@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, {useMemo, useState} from 'react';
+
 import {
   Pressable,
   ScrollView,
@@ -6,11 +7,11 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useNavigation} from '@react-navigation/native';
 
-import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
+import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<
   MainStackParamList,
@@ -52,24 +53,60 @@ function HomeScreen() {
     // Earnings navigation will be connected later.
   };
 
+  const handleViewHistory = () => {
+    navigation.navigate('DeliveryHistory');
+  };
+
+  const handleViewNotifications = () => {
+    navigation.navigate('Notifications');
+  };
+
+  const handleViewSupport = () => {
+    navigation.navigate('Support');
+  };
+
+  const handleViewProfile = () => {
+    navigation.navigate('Profile');
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={['top', 'left', 'right']}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+        showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={styles.headerTextContainer}>
             <Text style={styles.greeting}>{greeting}</Text>
             <Text style={styles.partnerName}>Delivery Partner</Text>
           </View>
 
-          <Pressable
-            style={styles.notificationButton}
-            onPress={() => {}}
-          >
-            <Text style={styles.notificationIcon}>●</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={styles.profileButton}
+              onPress={handleViewProfile}
+              accessibilityRole="button"
+              accessibilityLabel="Open profile">
+              <Text style={styles.profileButtonText}>S</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.notificationButton}
+              onPress={handleViewNotifications}
+              accessibilityRole="button"
+              accessibilityLabel="Open notifications">
+              <View style={styles.bellContainer}>
+                <View style={styles.bellBody} />
+                <View style={styles.bellBottom} />
+                <View style={styles.bellClapper} />
+              </View>
+
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>3</Text>
+              </View>
+            </Pressable>
+          </View>
         </View>
 
         <View
@@ -78,8 +115,7 @@ function HomeScreen() {
             isOnline
               ? styles.availabilityCardOnline
               : styles.availabilityCardOffline,
-          ]}
-        >
+          ]}>
           <View style={styles.availabilityInfo}>
             <View
               style={[
@@ -101,8 +137,7 @@ function HomeScreen() {
                   isOnline
                     ? styles.availabilityStatusOnline
                     : styles.availabilityStatusOffline,
-                ]}
-              >
+                ]}>
                 {isOnline ? 'ONLINE' : 'OFFLINE'}
               </Text>
             </View>
@@ -115,16 +150,14 @@ function HomeScreen() {
                 ? styles.availabilityButtonOnline
                 : styles.availabilityButtonOffline,
             ]}
-            onPress={handleToggleAvailability}
-          >
+            onPress={handleToggleAvailability}>
             <Text
               style={[
                 styles.availabilityButtonText,
                 isOnline
                   ? styles.availabilityButtonTextOnline
                   : styles.availabilityButtonTextOffline,
-              ]}
-            >
+              ]}>
               {isOnline ? 'Go Offline' : 'Go Online'}
             </Text>
           </Pressable>
@@ -161,8 +194,7 @@ function HomeScreen() {
 
         <Pressable
           style={styles.deliveryCard}
-          onPress={handleCurrentDelivery}
-        >
+          onPress={handleCurrentDelivery}>
           <View style={styles.deliveryTopRow}>
             <View>
               <Text style={styles.deliveryLabel}>Order</Text>
@@ -242,9 +274,9 @@ function HomeScreen() {
         <View style={styles.quickActionsRow}>
           <Pressable
             style={[styles.quickAction, styles.quickActionMargin]}
-            onPress={handleViewDeliveries}
-          >
+            onPress={handleViewDeliveries}>
             <Text style={styles.quickActionNumber}>8</Text>
+
             <Text style={styles.quickActionLabel}>
               My Deliveries
             </Text>
@@ -252,14 +284,56 @@ function HomeScreen() {
 
           <Pressable
             style={styles.quickAction}
-            onPress={handleViewEarnings}
-          >
+            onPress={handleViewEarnings}>
             <Text style={styles.quickActionNumber}>NPR</Text>
+
             <Text style={styles.quickActionLabel}>
               Earnings
             </Text>
           </Pressable>
         </View>
+
+        <Pressable
+          style={styles.historyQuickAction}
+          onPress={handleViewHistory}
+          accessibilityRole="button"
+          accessibilityLabel="View delivery history">
+          <View style={styles.historyQuickActionText}>
+            <Text style={styles.quickActionLabel}>
+              Delivery History
+            </Text>
+
+            <Text style={styles.historyQuickActionDescription}>
+              Review your past deliveries
+            </Text>
+          </View>
+
+          <Text style={styles.historyQuickActionArrow}>›</Text>
+        </Pressable>
+
+        <Pressable
+          style={styles.supportQuickAction}
+          onPress={handleViewSupport}
+          accessibilityRole="button"
+          accessibilityLabel="Open support and emergency">
+          <View style={styles.supportQuickActionIcon}>
+            <Text style={styles.supportQuickActionIconText}>
+              ?
+            </Text>
+          </View>
+
+          <View style={styles.supportQuickActionText}>
+            <Text style={styles.supportQuickActionTitle}>
+              Support & Emergency
+            </Text>
+
+            <Text style={styles.supportQuickActionDescription}>
+              Get help or report an urgent problem
+            </Text>
+          </View>
+
+          <Text style={styles.supportQuickActionArrow}>›</Text>
+        </Pressable>
 
         <View style={styles.infoBanner}>
           <View style={styles.infoIcon}>
@@ -317,20 +391,95 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
 
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  profileButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#E8F5E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+    marginRight: 10,
+  },
+
+  profileButtonText: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#2E7D32',
+  },
+
   notificationButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E4E9E4',
+    position: 'relative',
   },
 
-  notificationIcon: {
-    fontSize: 18,
-    color: '#2E7D32',
+  bellContainer: {
+    width: 22,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+
+  bellBody: {
+    width: 17,
+    height: 18,
+    borderWidth: 2,
+    borderColor: '#2E7D32',
+    borderTopLeftRadius: 9,
+    borderTopRightRadius: 9,
+    borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 4,
+    borderBottomWidth: 2,
+  },
+
+  bellBottom: {
+    width: 21,
+    height: 2,
+    backgroundColor: '#2E7D32',
+    borderRadius: 2,
+    marginTop: -1,
+  },
+
+  bellClapper: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#2E7D32',
+    marginTop: 2,
+  },
+
+  notificationBadge: {
+    position: 'absolute',
+    top: 3,
+    right: 3,
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: '#D32F2F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+
+  notificationBadgeText: {
+    fontSize: 8,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 
   availabilityCard: {
@@ -635,6 +784,90 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#4B5563',
     fontWeight: '600',
+  },
+
+  historyQuickAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    minHeight: 72,
+    marginBottom: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5EAE5',
+    borderRadius: 15,
+    padding: 16,
+  },
+
+  historyQuickActionText: {
+    flex: 1,
+  },
+
+  historyQuickActionDescription: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+
+  historyQuickActionArrow: {
+    fontSize: 26,
+    fontWeight: '600',
+    color: '#2E7D32',
+    marginLeft: 12,
+  },
+
+  supportQuickAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    minHeight: 78,
+    marginBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5EAE5',
+    borderRadius: 15,
+    padding: 16,
+  },
+
+  supportQuickActionIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#E8F5E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+
+  supportQuickActionIconText: {
+    fontSize: 21,
+    fontWeight: '800',
+    color: '#2E7D32',
+  },
+
+  supportQuickActionText: {
+    flex: 1,
+  },
+
+  supportQuickActionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+
+  supportQuickActionDescription: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+
+  supportQuickActionArrow: {
+    fontSize: 26,
+    fontWeight: '600',
+    color: '#2E7D32',
+    marginLeft: 12,
   },
 
   infoBanner: {
