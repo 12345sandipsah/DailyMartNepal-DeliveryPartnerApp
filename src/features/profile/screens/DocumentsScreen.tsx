@@ -9,24 +9,43 @@ import {
   View,
 } from 'react-native';
 
-import {useNavigation} from '@react-navigation/native';
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
+import {
+  faArrowLeft,
+  faChevronRight,
+  faCircleCheck,
+  faCircleInfo,
+  faFileLines,
+} from '@fortawesome/free-solid-svg-icons';
 
-import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
+import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
+import { useDocuments } from '../context/DocumentsContext';
 
-type DocumentsNavigationProp =
-  NativeStackNavigationProp<
-    MainStackParamList,
-    'Documents'
-  >;
+type DocumentsNavigationProp = NativeStackNavigationProp<
+  MainStackParamList,
+  'Documents'
+>;
 
-const DOCUMENTS = [
+type DocumentId = 'DL' | 'CID' | 'VR' | 'INS';
+type DocumentStatus = 'PENDING' | 'VERIFIED' | 'VALID' | 'REJECTED';
+
+type DocumentListItem = {
+  id: DocumentId;
+  title: string;
+  number: string;
+  status: DocumentStatus;
+  expiry: string;
+  description: string;
+};
+
+const DOCUMENTS: DocumentListItem[] = [
   {
     id: 'DL',
     title: 'Driving License',
     number: 'DL-NEP-204581',
     status: 'VERIFIED',
-    statusType: 'verified',
     expiry: 'Valid until 18 Dec 2028',
     description:
       'Your driving license has been verified and is currently valid.',
@@ -36,42 +55,50 @@ const DOCUMENTS = [
     title: 'Citizenship / ID',
     number: 'ID-NEP-884521',
     status: 'VERIFIED',
-    statusType: 'verified',
     expiry: 'No expiry',
-    description:
-      'Your identity document has been verified by DailyMart Nepal.',
+    description: 'Your identity document has been verified by DailyMart Nepal.',
   },
   {
     id: 'VR',
     title: 'Vehicle Registration',
     number: 'BA 12 PA 3456',
     status: 'VERIFIED',
-    statusType: 'verified',
     expiry: 'Valid until 14 Aug 2028',
-    description:
-      'Your vehicle registration information has been verified.',
+    description: 'Your vehicle registration information has been verified.',
   },
   {
     id: 'INS',
     title: 'Vehicle Insurance',
     number: 'INS-NEP-458921',
     status: 'VALID',
-    statusType: 'valid',
     expiry: 'Valid until 18 Dec 2026',
-    description:
-      'Your vehicle insurance is currently valid.',
+    description: 'Your vehicle insurance is currently valid.',
   },
 ];
 
 const DocumentsScreen = () => {
-  const navigation =
-    useNavigation<DocumentsNavigationProp>();
+  const navigation = useNavigation<DocumentsNavigationProp>();
+  const { getUploadedDocument } = useDocuments();
 
-  const handleDocumentPress = (documentId: string) => {
-    navigation.navigate('DocumentDetails', {
-      documentId,
-    });
+  const handleDocumentPress = (documentId: DocumentId) => {
+    navigation.navigate('DocumentDetails', { documentId });
   };
+
+  const documentItems = DOCUMENTS.map(document => {
+    const uploadedDocument = getUploadedDocument(document.id);
+    const status: DocumentStatus =
+      uploadedDocument?.status === 'PENDING' ? 'PENDING' : document.status;
+
+    return {
+      ...document,
+      status,
+      uploadedDocument,
+    };
+  });
+
+  const verifiedCount = documentItems.filter(
+    document => document.status === 'VERIFIED' || document.status === 'VALID',
+  ).length;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -81,149 +108,134 @@ const DocumentsScreen = () => {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
             accessibilityRole="button"
-            accessibilityLabel="Go back">
-            <Text style={styles.backArrow}>‹</Text>
+            accessibilityLabel="Go back"
+          >
+            <FontAwesomeIcon icon={faArrowLeft} size={18} color="#1F2937" />
           </Pressable>
 
-          <Text style={styles.headerTitle}>
-            My Documents
-          </Text>
-
+          <Text style={styles.headerTitle}>My Documents</Text>
           <View style={styles.headerSpacer} />
         </View>
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}>
+          contentContainerStyle={styles.scrollContent}
+        >
           <View style={styles.introCard}>
             <View style={styles.introIcon}>
-              <Text style={styles.introIconText}>✓</Text>
+              <FontAwesomeIcon icon={faCircleCheck} size={20} color="#FFFFFF" />
             </View>
 
             <View style={styles.introContent}>
-              <Text style={styles.introTitle}>
-                Document Verification
-              </Text>
-
+              <Text style={styles.introTitle}>Document Verification</Text>
               <Text style={styles.introText}>
-                Keep your delivery partner documents valid and up to
-                date. Verified documents may be required for delivery
-                operations.
+                Keep your delivery partner documents valid and up to date.
+                Verified documents may be required for delivery operations.
               </Text>
             </View>
           </View>
 
           <View style={styles.summaryRow}>
             <View style={[styles.summaryCard, styles.summaryCardMargin]}>
-              <Text style={styles.summaryValue}>
-                4
-              </Text>
-
-              <Text style={styles.summaryLabel}>
-                Total Documents
-              </Text>
+              <Text style={styles.summaryValue}>{documentItems.length}</Text>
+              <Text style={styles.summaryLabel}>Total Documents</Text>
             </View>
 
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryValue}>
-                4
-              </Text>
-
-              <Text style={styles.summaryLabel}>
-                Verified
-              </Text>
+              <Text style={styles.summaryValue}>{verifiedCount}</Text>
+              <Text style={styles.summaryLabel}>Verified / Valid</Text>
             </View>
           </View>
 
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>
-              Your Documents
-            </Text>
-
+            <Text style={styles.sectionTitle}>Your Documents</Text>
             <Text style={styles.sectionCount}>
-              {DOCUMENTS.length} documents
+              {documentItems.length} documents
             </Text>
           </View>
 
-          {DOCUMENTS.map(document => (
-            <Pressable
-              key={document.id}
-              style={styles.documentCard}
-              onPress={() =>
-                handleDocumentPress(document.id)
-              }
-              accessibilityRole="button"
-              accessibilityLabel={`Open ${document.title}`}>
-              <View style={styles.documentIcon}>
-                <Text style={styles.documentIconText}>
-                  ▤
-                </Text>
-              </View>
+          {documentItems.map(document => {
+            const isVerified = document.status === 'VERIFIED';
+            const isValid = document.status === 'VALID';
+            const isPending = document.status === 'PENDING';
+            const isRejected = document.status === 'REJECTED';
 
-              <View style={styles.documentContent}>
-                <View style={styles.documentTitleRow}>
-                  <Text style={styles.documentTitle}>
-                    {document.title}
-                  </Text>
+            return (
+              <Pressable
+                key={document.id}
+                style={styles.documentCard}
+                onPress={() => handleDocumentPress(document.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${document.title}`}
+              >
+                <View style={styles.documentIcon}>
+                  <FontAwesomeIcon
+                    icon={faFileLines}
+                    size={20}
+                    color="#1976D2"
+                  />
+                </View>
 
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      document.statusType === 'verified' &&
-                        styles.statusBadgeVerified,
-                      document.statusType === 'valid' &&
-                        styles.statusBadgeValid,
-                    ]}>
-                    <Text
+                <View style={styles.documentContent}>
+                  <View style={styles.documentTitleRow}>
+                    <Text style={styles.documentTitle}>{document.title}</Text>
+
+                    <View
                       style={[
-                        styles.statusBadgeText,
-                        document.statusType === 'verified' &&
-                          styles.statusBadgeTextVerified,
-                        document.statusType === 'valid' &&
-                          styles.statusBadgeTextValid,
-                      ]}>
-                      {document.status}
+                        styles.statusBadge,
+                        (isVerified || isValid) && styles.statusBadgeVerified,
+                        isPending && styles.statusBadgePending,
+                        isRejected && styles.statusBadgeRejected,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusBadgeText,
+                          (isVerified || isValid) &&
+                            styles.statusBadgeTextVerified,
+                          isPending && styles.statusBadgeTextPending,
+                          isRejected && styles.statusBadgeTextRejected,
+                        ]}
+                      >
+                        {document.status}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.documentNumber}>{document.number}</Text>
+                  <Text style={styles.documentExpiry}>{document.expiry}</Text>
+
+                  {document.uploadedDocument ? (
+                    <Text style={styles.uploadedFileHint} numberOfLines={1}>
+                      Uploaded: {document.uploadedDocument.fileName}
                     </Text>
+                  ) : null}
+
+                  <View style={styles.documentFooter}>
+                    <Text style={styles.documentDescription}>
+                      {document.description}
+                    </Text>
+                    <FontAwesomeIcon
+                      icon={faChevronRight}
+                      size={14}
+                      color="#2E7D32"
+                    />
                   </View>
                 </View>
-
-                <Text style={styles.documentNumber}>
-                  {document.number}
-                </Text>
-
-                <Text style={styles.documentExpiry}>
-                  {document.expiry}
-                </Text>
-
-                <View style={styles.documentFooter}>
-                  <Text style={styles.documentDescription}>
-                    {document.description}
-                  </Text>
-
-                  <Text style={styles.documentArrow}>
-                    ›
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-          ))}
+              </Pressable>
+            );
+          })}
 
           <View style={styles.noticeCard}>
             <View style={styles.noticeIcon}>
-              <Text style={styles.noticeIconText}>
-                i
-              </Text>
+              <FontAwesomeIcon icon={faCircleInfo} size={15} color="#FFFFFF" />
             </View>
 
             <View style={styles.noticeContent}>
-              <Text style={styles.noticeTitle}>
-                Document changes
-              </Text>
-
+              <Text style={styles.noticeTitle}>Document changes</Text>
               <Text style={styles.noticeText}>
-                Official documents may require verification or admin
-                approval before they become active in the production
-                system.
+                Official documents may require verification or admin approval
+                before they become active in the production system.
               </Text>
             </View>
           </View>
@@ -240,11 +252,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F7F9F7',
   },
-
   container: {
     flex: 1,
   },
-
   header: {
     minHeight: 64,
     paddingHorizontal: 16,
@@ -254,7 +264,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-
   backButton: {
     width: 42,
     height: 42,
@@ -262,13 +271,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  backArrow: {
-    fontSize: 32,
-    lineHeight: 32,
-    color: '#1F2937',
-  },
-
   headerTitle: {
     flex: 1,
     textAlign: 'center',
@@ -276,17 +278,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1F2937',
   },
-
   headerSpacer: {
     width: 42,
   },
-
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 20,
     paddingBottom: 30,
   },
-
   introCard: {
     padding: 16,
     borderRadius: 16,
@@ -295,7 +294,6 @@ const styles = StyleSheet.create({
     borderColor: '#D8EAD8',
     flexDirection: 'row',
   },
-
   introIcon: {
     width: 40,
     height: 40,
@@ -305,35 +303,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 11,
   },
-
-  introIconText: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-
   introContent: {
     flex: 1,
   },
-
   introTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: '#1F2937',
   },
-
   introText: {
     marginTop: 4,
     fontSize: 11,
     lineHeight: 17,
     color: '#667066',
   },
-
   summaryRow: {
     flexDirection: 'row',
     marginTop: 18,
   },
-
   summaryCard: {
     flex: 1,
     minHeight: 82,
@@ -344,23 +331,19 @@ const styles = StyleSheet.create({
     borderColor: '#E5EAE5',
     justifyContent: 'center',
   },
-
   summaryCardMargin: {
     marginRight: 10,
   },
-
   summaryValue: {
     fontSize: 23,
     fontWeight: '700',
     color: '#2E7D32',
   },
-
   summaryLabel: {
     marginTop: 4,
     fontSize: 11,
     color: '#6B7280',
   },
-
   sectionHeader: {
     marginTop: 24,
     marginBottom: 11,
@@ -368,18 +351,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-
   sectionTitle: {
     fontSize: 17,
     fontWeight: '700',
     color: '#1F2937',
   },
-
   sectionCount: {
     fontSize: 11,
     color: '#6B7280',
   },
-
   documentCard: {
     padding: 15,
     marginBottom: 12,
@@ -389,7 +369,6 @@ const styles = StyleSheet.create({
     borderColor: '#E5EAE5',
     flexDirection: 'row',
   },
-
   documentIcon: {
     width: 44,
     height: 44,
@@ -399,22 +378,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
-
-  documentIconText: {
-    fontSize: 21,
-    color: '#1976D2',
-  },
-
   documentContent: {
     flex: 1,
   },
-
   documentTitleRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
-
   documentTitle: {
     flex: 1,
     paddingRight: 8,
@@ -422,53 +393,54 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1F2937',
   },
-
   statusBadge: {
     paddingHorizontal: 7,
     paddingVertical: 4,
     borderRadius: 7,
   },
-
   statusBadgeVerified: {
     backgroundColor: '#E8F5E9',
   },
-
-  statusBadgeValid: {
-    backgroundColor: '#EEF8EF',
+  statusBadgePending: {
+    backgroundColor: '#FFF3CD',
   },
-
+  statusBadgeRejected: {
+    backgroundColor: '#FDECEC',
+  },
   statusBadgeText: {
     fontSize: 8,
     fontWeight: '800',
   },
-
   statusBadgeTextVerified: {
     color: '#2E7D32',
   },
-
-  statusBadgeTextValid: {
-    color: '#2E7D32',
+  statusBadgeTextPending: {
+    color: '#A16207',
   },
-
+  statusBadgeTextRejected: {
+    color: '#D32F2F',
+  },
   documentNumber: {
     marginTop: 7,
     fontSize: 11,
     fontWeight: '600',
     color: '#4B5563',
   },
-
   documentExpiry: {
     marginTop: 4,
     fontSize: 10,
     color: '#6B7280',
   },
-
+  uploadedFileHint: {
+    marginTop: 5,
+    fontSize: 10,
+    color: '#2E7D32',
+  },
   documentFooter: {
     marginTop: 9,
     flexDirection: 'row',
     alignItems: 'flex-end',
   },
-
   documentDescription: {
     flex: 1,
     paddingRight: 8,
@@ -476,12 +448,6 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: '#8A918A',
   },
-
-  documentArrow: {
-    fontSize: 23,
-    color: '#2E7D32',
-  },
-
   noticeCard: {
     marginTop: 10,
     padding: 15,
@@ -491,7 +457,6 @@ const styles = StyleSheet.create({
     borderColor: '#F4DFAC',
     flexDirection: 'row',
   },
-
   noticeIcon: {
     width: 28,
     height: 28,
@@ -501,30 +466,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 11,
   },
-
-  noticeIconText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-
   noticeContent: {
     flex: 1,
   },
-
   noticeTitle: {
     fontSize: 13,
     fontWeight: '700',
     color: '#1F2937',
   },
-
   noticeText: {
     marginTop: 4,
     fontSize: 11,
     lineHeight: 17,
     color: '#6B7280',
   },
-
   bottomSpacing: {
     height: 20,
   },

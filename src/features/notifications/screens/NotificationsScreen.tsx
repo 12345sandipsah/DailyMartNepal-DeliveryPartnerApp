@@ -1,218 +1,505 @@
-import React, {useMemo, useState} from 'react';
-
+import React, {useCallback, useMemo, useState} from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import {
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+  faBox,
+  faBullhorn,
+  faBell,
+  faCheck,
+  faChevronRight,
+  faCircleInfo,
+  faCreditCard,
+  faGift,
+  faHouse,
+  faMapLocationDot,
+  faMoneyBillWave,
+  faTruck,
+  faWarehouse,
+  faHeadset,
+  faUser,
+} from '@fortawesome/free-solid-svg-icons';
 
-import {useNavigation} from '@react-navigation/native';
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {Alert, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 
-import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-type NotificationType =
-  | 'DELIVERY'
-  | 'PICKUP'
-  | 'PAYMENT'
-  | 'SYSTEM';
+import {useFocusEffect, useNavigation} from '@react-navigation/native';
+
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+
+import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
+import {getPartnerNotifications, markPartnerNotificationRead} from '../../../shared/services/api';
+
+type NotificationType = 'DELIVERY' | 'PICKUP' | 'PAYMENT' | 'SYSTEM';
+
+type NotificationCategory = 'SUPPORT';
+
+type NotificationGroup = 'TODAY' | 'YESTERDAY' | 'THIS_WEEK';
 
 type NotificationItem = {
   id: string;
+
   type: NotificationType;
+
+  category?: NotificationCategory;
+
+  title: string;
+
+  message: string;
+
+  time: string;
+
+  read: boolean;
+
+  deliveryId?: string;
+
+  group: NotificationGroup;
+};
+
+type FilterType = 'ALL' | 'ORDERS' | 'PAYMENTS' | 'ANNOUNCEMENTS' | 'SUPPORT';
+
+type NotificationsNavigationProp = NativeStackNavigationProp<
+  MainStackParamList,
+  'Notifications'
+>;
+
+type BottomNavItemProps = {
+  label: 'Home' | 'Deliveries' | 'Earnings' | 'Notifications' | 'Profile';
+
+  active: boolean;
+
+  notification?: boolean;
+
+  onPress: () => void;
+};
+
+const INITIAL_NOTIFICATIONS: NotificationItem[] = [];
+
+const mapPartnerNotification = (record: {
+  _id: string;
+  type?: string;
   title: string;
   message: string;
-  time: string;
-  read: boolean;
-  deliveryId?: string;
+  createdAt: string;
+  isRead: boolean;
+  data?: {orderNumber?: string; orderId?: string};
+}): NotificationItem => {
+  const createdAt = new Date(record.createdAt);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const day = new Date(createdAt);
+  day.setHours(0, 0, 0, 0);
+  const group: NotificationGroup =
+    day.getTime() === today.getTime()
+      ? 'TODAY'
+      : day.getTime() === yesterday.getTime()
+        ? 'YESTERDAY'
+        : 'THIS_WEEK';
+  const rawType = String(record.type || '').toLowerCase();
+  const title = String(record.title || 'DailyMart update');
+  const type: NotificationType =
+    rawType.includes('payment')
+      ? 'PAYMENT'
+      : title.toLowerCase().includes('pickup')
+        ? 'PICKUP'
+        : rawType.includes('delivery') || rawType.includes('order')
+          ? 'DELIVERY'
+          : 'SYSTEM';
+  return {
+    id: record._id,
+    type,
+    title,
+    message: String(record.message || ''),
+    time: createdAt.toLocaleString(),
+    read: Boolean(record.isRead),
+    deliveryId: record.data?.orderNumber || record.data?.orderId,
+    group,
+  };
 };
+const matchesFilter = (
+  notification: NotificationItem,
 
-type FilterType = 'ALL' | 'UNREAD';
+  filter: FilterType,
+) => {
+  switch (filter) {
+    case 'ORDERS':
+      return notification.type === 'DELIVERY' || notification.type === 'PICKUP';
 
-type NotificationsNavigationProp =
-  NativeStackNavigationProp<MainStackParamList>;
+    case 'PAYMENTS':
+      return notification.type === 'PAYMENT';
 
-const INITIAL_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: '1',
-    type: 'DELIVERY',
-    title: 'New Delivery Assigned',
-    message:
-      'Order #DM12351 has been assigned to you. Please review the delivery details.',
-    time: '2 min ago',
-    read: false,
-    deliveryId: 'DM12351',
-  },
-  {
-    id: '2',
-    type: 'PICKUP',
-    title: 'Pickup Reminder',
-    message:
-      'Please collect Order #DM12350 from the warehouse before starting the delivery.',
-    time: '15 min ago',
-    read: false,
-    deliveryId: 'DM12350',
-  },
-  {
-    id: '3',
-    type: 'PAYMENT',
-    title: 'COD Collection',
-    message:
-      'Collect NPR 850 from the customer for Order #DM12345.',
-    time: '32 min ago',
-    read: false,
-    deliveryId: 'DM12345',
-  },
-  {
-    id: '4',
-    type: 'DELIVERY',
-    title: 'Delivery Update',
-    message:
-      'Order #DM12346 has been accepted successfully. Proceed to the warehouse for pickup.',
-    time: '1 hour ago',
-    read: true,
-    deliveryId: 'DM12346',
-  },
-  {
-    id: '5',
-    type: 'SYSTEM',
-    title: 'Availability Reminder',
-    message:
-      'You are currently offline. Go online when you are ready to receive delivery assignments.',
-    time: '2 hours ago',
-    read: true,
-  },
-  {
-    id: '6',
-    type: 'DELIVERY',
-    title: 'Delivery Completed',
-    message:
-      'Order #DM12349 was successfully delivered. Your delivery record has been updated.',
-    time: 'Yesterday',
-    read: true,
-    deliveryId: 'DM12349',
-  },
-  {
-    id: '7',
-    type: 'SYSTEM',
-    title: 'Welcome to DailyMart Nepal',
-    message:
-      'Keep your availability updated and check your notifications regularly for delivery updates.',
-    time: 'Yesterday',
-    read: true,
-  },
-];
+    case 'ANNOUNCEMENTS':
+      return (
+        notification.type === 'SYSTEM' &&
+        notification.category !== 'SUPPORT' &&
+        (notification.title
 
-const getNotificationLabel = (
-  type: NotificationType,
-): string => {
-  switch (type) {
-    case 'DELIVERY':
-      return 'DELIVERY';
+          .toLowerCase()
 
-    case 'PICKUP':
-      return 'PICKUP';
+          .includes('announcement') ||
+          notification.title
 
-    case 'PAYMENT':
-      return 'PAYMENT';
+            .toLowerCase()
 
-    case 'SYSTEM':
-      return 'SYSTEM';
+            .includes('zone') ||
+          notification.title
+
+            .toLowerCase()
+
+            .includes('bonus'))
+      );
+
+    case 'SUPPORT':
+      return notification.category === 'SUPPORT';
+
+    case 'ALL':
 
     default:
-      return 'UPDATE';
+      return true;
   }
 };
 
-const getNotificationIcon = (
-  type: NotificationType,
-): string => {
-  switch (type) {
-    case 'DELIVERY':
-      return 'D';
-
-    case 'PICKUP':
-      return 'P';
-
-    case 'PAYMENT':
-      return '₹';
-
-    case 'SYSTEM':
-      return 'S';
-
-    default:
-      return 'N';
-  }
+const getUnreadCount = (notifications: NotificationItem[]) => {
+  return notifications.filter(notification => !notification.read).length;
 };
 
-const getNotificationIconBackground = (
-  type: NotificationType,
-): string => {
-  switch (type) {
-    case 'DELIVERY':
-      return '#E8F5E9';
+const HeaderBell = () => (
+  <View style={styles.headerBellButton}>
+    <FontAwesomeIcon icon={faBell} size={22} color="#0B604C" />
+    <View style={styles.headerNotificationDot} />
+  </View>
+);
 
-    case 'PICKUP':
-      return '#E3F2FD';
+const ProfileAvatar = ({ onPress }: { onPress: () => void }) => {
+  return (
+    <Pressable
+      style={styles.profileButton}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Open profile"
+    >
+      <Text style={styles.profileText}>SS</Text>
 
-    case 'PAYMENT':
-      return '#FFF8E1';
+      <View style={styles.onlineDot} />
+    </Pressable>
+  );
+};
 
-    case 'SYSTEM':
-      return '#F3E5F5';
+const NotificationIcon = ({
+  notification,
+}: {
+  notification: NotificationItem;
+}) => {
+  let icon = faCircleInfo;
+  let color = '#1877D4';
+  let circleStyle = styles.iconCircleBlue;
+  const title = notification.title.toLowerCase();
 
-    default:
-      return '#F3F4F6';
+  if (notification.category === 'SUPPORT') {
+    icon = faHeadset;
+    color = '#F04444';
+    circleStyle = styles.iconCircleRed;
+  } else if (notification.type === 'DELIVERY') {
+    icon = title.includes('completed') ? faCheck : faBox;
+    color = '#159447';
+    circleStyle = styles.iconCircleGreen;
+  } else if (notification.type === 'PICKUP') {
+    icon = faWarehouse;
+    color = '#F28B10';
+    circleStyle = styles.iconCircleOrange;
+  } else if (notification.type === 'PAYMENT') {
+    icon = faMoneyBillWave;
+    color = '#1877D4';
+    circleStyle = styles.iconCircleBlue;
+  } else if (title.includes('bonus')) {
+    icon = faGift;
+    color = '#7C3AED';
+    circleStyle = styles.iconCirclePurple;
+  } else if (title.includes('zone')) {
+    icon = faMapLocationDot;
+    color = '#F28B10';
+    circleStyle = styles.iconCircleOrange;
   }
+
+  return (
+    <View style={[styles.iconCircle, circleStyle]}>
+      <FontAwesomeIcon icon={icon} size={21} color={color} />
+    </View>
+  );
+};
+
+const NotificationCard = ({
+  notification,
+
+  onPress,
+}: {
+  notification: NotificationItem;
+
+  onPress: () => void;
+}) => {
+  let cardStyle = styles.notificationCard;
+
+  if (notification.type === 'DELIVERY' && !notification.read) {
+    cardStyle = styles.notificationCardGreen;
+  }
+
+  if (notification.type === 'PICKUP' && !notification.read) {
+    cardStyle = styles.notificationCardOrange;
+  }
+
+  if (notification.type === 'PAYMENT' && !notification.read) {
+    cardStyle = styles.notificationCardBlue;
+  }
+
+  return (
+    <Pressable
+      style={cardStyle}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${notification.title} notification`}
+    >
+      <NotificationIcon notification={notification} />
+
+      <View style={styles.cardContent}>
+        <Text
+          style={[
+            styles.notificationTitle,
+
+            !notification.read && styles.notificationTitleUnread,
+          ]}
+          numberOfLines={2}
+        >
+          {notification.title}
+        </Text>
+
+        <Text style={styles.notificationMessage} numberOfLines={3}>
+          {notification.message}
+        </Text>
+      </View>
+
+      <View style={styles.cardRight}>
+        <Text style={styles.notificationTime} numberOfLines={2}>
+          {notification.time}
+        </Text>
+
+        {!notification.read && <View style={styles.unreadDot} />}
+
+        <FontAwesomeIcon icon={faChevronRight} size={13} color="#9BA2A6" />
+      </View>
+    </Pressable>
+  );
+};
+
+const NotificationSection = ({
+  title,
+
+  notifications,
+
+  onNotificationPress,
+}: {
+  title: string;
+
+  notifications: NotificationItem[];
+
+  onNotificationPress: (notification: NotificationItem) => void;
+}) => {
+  if (notifications.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+
+      {notifications.map(notification => (
+        <NotificationCard
+          key={notification.id}
+          notification={notification}
+          onPress={() => onNotificationPress(notification)}
+        />
+      ))}
+    </View>
+  );
+};
+
+const FilterPill = ({
+  label,
+  icon,
+  active,
+  count,
+  onPress,
+}: {
+  label: string;
+  icon?: typeof faBox;
+  active: boolean;
+  count?: number;
+  onPress: () => void;
+}) => (
+  <Pressable
+    style={[styles.filterPill, active && styles.filterPillActive]}
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={`Filter ${label}`}
+  >
+    {icon && (
+      <FontAwesomeIcon
+        icon={icon}
+        size={12}
+        color={active ? '#FFFFFF' : '#168648'}
+        style={{ marginRight: 5 }}
+      />
+    )}
+    <Text style={[styles.filterText, active && styles.filterTextActive]}>
+      {label}
+    </Text>
+    {count !== undefined && (
+      <View style={styles.filterBadge}>
+        <Text style={styles.filterBadgeText}>{count}</Text>
+      </View>
+    )}
+  </Pressable>
+);
+
+const BottomNavIcon = ({
+  label,
+  active,
+}: {
+  label: 'Home' | 'Deliveries' | 'Earnings' | 'Notifications' | 'Profile';
+  active: boolean;
+}) => {
+  const icon =
+    label === 'Home'
+      ? faHouse
+      : label === 'Deliveries'
+      ? faTruck
+      : label === 'Earnings'
+      ? faCreditCard
+      : label === 'Notifications'
+      ? faBell
+      : faUser;
+  return (
+    <View style={styles.navIconBox}>
+      <FontAwesomeIcon
+        icon={icon}
+        size={21}
+        color={active ? '#079447' : '#697277'}
+      />
+    </View>
+  );
+};
+
+const BottomNavItem = ({
+  label,
+
+  active,
+
+  notification,
+
+  onPress,
+}: BottomNavItemProps) => {
+  return (
+    <Pressable
+      style={styles.bottomNavItem}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{
+        selected: active,
+      }}
+    >
+      <View style={styles.bottomIconWrapper}>
+        <BottomNavIcon label={label} active={active} />
+
+        {notification && <View style={styles.bottomNotificationDot} />}
+      </View>
+
+      <Text
+        style={[styles.bottomNavLabel, active && styles.bottomNavLabelActive]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
 };
 
 const NotificationsScreen = () => {
-  const navigation =
-    useNavigation<NotificationsNavigationProp>();
+  const navigation = useNavigation<NotificationsNavigationProp>();
 
-  const [notifications, setNotifications] =
-    useState<NotificationItem[]>(
-      INITIAL_NOTIFICATIONS,
-    );
+  const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
 
-  const [activeFilter, setActiveFilter] =
-    useState<FilterType>('ALL');
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      getPartnerNotifications()
+        .then(records => {
+          if (active) setNotifications(records.map(mapPartnerNotification));
+        })
+        .catch(error => {
+          if (active) Alert.alert('Notifications unavailable', error instanceof Error ? error.message : 'Please retry.');
+        });
+      return () => { active = false; };
+    }, []),
+  );
+
+  const [activeFilter, setActiveFilter] = useState<FilterType>('ALL');
 
   const unreadCount = useMemo(
-    () =>
-      notifications.filter(
-        notification => !notification.read,
-      ).length,
+    () => getUnreadCount(notifications),
+
     [notifications],
   );
 
-  const filteredNotifications = useMemo(() => {
-    if (activeFilter === 'UNREAD') {
-      return notifications.filter(
-        notification => !notification.read,
+  const filteredNotifications = useMemo(
+    () =>
+      notifications.filter(notification =>
+        matchesFilter(
+          notification,
+
+          activeFilter,
+        ),
+      ),
+
+    [notifications, activeFilter],
+  );
+
+  const todayNotifications = filteredNotifications.filter(
+    notification => notification.group === 'TODAY',
+  );
+
+  const yesterdayNotifications = filteredNotifications.filter(
+    notification => notification.group === 'YESTERDAY',
+  );
+
+  const thisWeekNotifications = filteredNotifications.filter(
+    notification => notification.group === 'THIS_WEEK',
+  );
+
+  const handleGoHome = () => {
+    navigation.navigate('Home');
+  };
+
+  const handleGoDeliveries = () => {
+    navigation.navigate('Deliveries');
+  };
+
+  const handleGoEarnings = () => {
+    navigation.navigate('Earnings');
+  };
+
+  const handleGoProfile = () => {
+    navigation.navigate('Profile');
+  };
+
+  const handleNotificationPress = (notification: NotificationItem) => {
+    if (!notification.read) {
+      markPartnerNotificationRead(notification.id).catch(error =>
+        Alert.alert('Could not update notification', error instanceof Error ? error.message : 'Please retry.'),
       );
     }
-
-    return notifications;
-  }, [activeFilter, notifications]);
-
-  const handleNotificationPress = (
-    notification: NotificationItem,
-  ) => {
-    setNotifications(currentNotifications =>
-      currentNotifications.map(currentNotification =>
-        currentNotification.id === notification.id
-          ? {
-              ...currentNotification,
-              read: true,
-            }
-          : currentNotification,
-      ),
+    setNotifications(current =>
+      current.map(item => item.id === notification.id ? {...item, read: true} : item),
     );
-
     navigation.navigate('NotificationDetails', {
       title: notification.title,
       message: notification.message,
@@ -224,197 +511,178 @@ const NotificationsScreen = () => {
   };
 
   const handleMarkAllAsRead = () => {
-    if (unreadCount === 0) {
-      return;
-    }
-
-    setNotifications(currentNotifications =>
-      currentNotifications.map(notification => ({
-        ...notification,
-        read: true,
-      })),
+    if (unreadCount === 0) return;
+    const unread = notifications.filter(notification => !notification.read);
+    setNotifications(current => current.map(notification => ({...notification, read: true})));
+    Promise.all(unread.map(notification => markPartnerNotificationRead(notification.id))).catch(error =>
+      Alert.alert('Some notifications could not be updated', error instanceof Error ? error.message : 'Please retry.'),
     );
   };
-
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerTitle}>
-              Notifications
-            </Text>
+        <ScrollView
+          style={styles.mainScroll}
+          contentContainerStyle={styles.mainScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <View style={styles.brandContainer}>
+              <View style={styles.brandRow}>
+                <View style={styles.leafIcon}>
+                  <Text style={styles.leafIconText}>◢</Text>
+                </View>
 
-            <Text style={styles.headerSubtitle}>
-              Stay updated with your deliveries
-            </Text>
+                <View>
+                  <Text style={styles.brandText}>
+                    Daily
+                    <Text style={styles.brandGreen}>Mart</Text>
+                  </Text>
+
+                  <Text style={styles.nepalText}>Nepal</Text>
+
+                  <Text style={styles.partnerText}>Delivery Partner</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.headerActions}>
+              <HeaderBell />
+
+              <ProfileAvatar onPress={handleGoProfile} />
+            </View>
           </View>
 
-          {unreadCount > 0 && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadBadgeText}>
-                {unreadCount}
-              </Text>
-            </View>
-          )}
-        </View>
+          <View style={styles.titleRow}>
+            <Text style={styles.pageTitle}>Notifications</Text>
 
-        <View style={styles.filterRow}>
-          <Pressable
-            style={[
-              styles.filterButton,
-              activeFilter === 'ALL' &&
-                styles.filterButtonActive,
-            ]}
-            onPress={() => setActiveFilter('ALL')}
-            accessibilityRole="button"
-            accessibilityLabel="Show all notifications">
-            <Text
-              style={[
-                styles.filterButtonText,
-                activeFilter === 'ALL' &&
-                  styles.filterButtonTextActive,
-              ]}>
-              All
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.filterButton,
-              activeFilter === 'UNREAD' &&
-                styles.filterButtonActive,
-            ]}
-            onPress={() => setActiveFilter('UNREAD')}
-            accessibilityRole="button"
-            accessibilityLabel="Show unread notifications">
-            <Text
-              style={[
-                styles.filterButtonText,
-                activeFilter === 'UNREAD' &&
-                  styles.filterButtonTextActive,
-              ]}>
-              Unread
-            </Text>
-
-            {unreadCount > 0 && (
-              <View style={styles.filterCountBadge}>
-                <Text style={styles.filterCountBadgeText}>
-                  {unreadCount}
-                </Text>
-              </View>
-            )}
-          </Pressable>
-
-          {unreadCount > 0 && (
             <Pressable
               style={styles.markAllButton}
               onPress={handleMarkAllAsRead}
+              disabled={unreadCount === 0}
               accessibilityRole="button"
-              accessibilityLabel="Mark all notifications as read">
-              <Text style={styles.markAllButtonText}>
-                Mark all as read
+              accessibilityLabel="Mark all notifications as read"
+            >
+              <Text style={styles.markAllCheck}>✓</Text>
+
+              <Text
+                style={[
+                  styles.markAllText,
+
+                  unreadCount === 0 && styles.markAllTextDisabled,
+                ]}
+              >
+                Mark All Read
               </Text>
             </Pressable>
-          )}
-        </View>
+          </View>
 
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}>
-          {filteredNotifications.length === 0 ? (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconContainer}>
-                <Text style={styles.emptyIcon}>✓</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+          >
+            <FilterPill
+              label="All"
+              active={activeFilter === 'ALL'}
+              count={unreadCount > 0 ? unreadCount : undefined}
+              onPress={() => setActiveFilter('ALL')}
+            />
+
+            <FilterPill
+              label="Orders"
+              icon={faBox}
+              active={activeFilter === 'ORDERS'}
+              onPress={() => setActiveFilter('ORDERS')}
+            />
+
+            <FilterPill
+              label="Payments"
+              icon={faCreditCard}
+              active={activeFilter === 'PAYMENTS'}
+              onPress={() => setActiveFilter('PAYMENTS')}
+            />
+
+            <FilterPill
+              label="Announcements"
+              icon={faBullhorn}
+              active={activeFilter === 'ANNOUNCEMENTS'}
+              onPress={() => setActiveFilter('ANNOUNCEMENTS')}
+            />
+
+            <FilterPill
+              label="Support"
+              icon={faHeadset}
+              active={activeFilter === 'SUPPORT'}
+              onPress={() => setActiveFilter('SUPPORT')}
+            />
+          </ScrollView>
+
+          <View style={styles.notificationArea}>
+            <NotificationSection
+              title="Today"
+              notifications={todayNotifications}
+              onNotificationPress={handleNotificationPress}
+            />
+
+            <NotificationSection
+              title="Yesterday"
+              notifications={yesterdayNotifications}
+              onNotificationPress={handleNotificationPress}
+            />
+
+            <NotificationSection
+              title="This Week"
+              notifications={thisWeekNotifications}
+              onNotificationPress={handleNotificationPress}
+            />
+
+            {filteredNotifications.length === 0 && (
+              <View style={styles.emptyState}>
+                <View style={styles.emptyIconCircle}>
+                  <Text style={styles.emptyIcon}>✓</Text>
+                </View>
+
+                <Text style={styles.emptyTitle}>No notifications</Text>
+
+                <Text style={styles.emptyDescription}>
+                  There are no notifications in this category right now.
+                </Text>
               </View>
+            )}
+          </View>
 
-              <Text style={styles.emptyTitle}>
-                {activeFilter === 'UNREAD'
-                  ? 'No unread notifications'
-                  : 'No notifications yet'}
-              </Text>
-
-              <Text style={styles.emptyDescription}>
-                {activeFilter === 'UNREAD'
-                  ? 'You are all caught up. New notifications will appear here.'
-                  : 'Delivery updates, payment alerts, and important messages will appear here.'}
-              </Text>
-            </View>
-          ) : (
-            filteredNotifications.map(notification => (
-              <Pressable
-                key={notification.id}
-                style={[
-                  styles.notificationCard,
-                  !notification.read &&
-                    styles.notificationCardUnread,
-                ]}
-                onPress={() =>
-                  handleNotificationPress(notification)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`${notification.title} notification`}>
-                <View
-                  style={[
-                    styles.iconContainer,
-                    {
-                      backgroundColor:
-                        getNotificationIconBackground(
-                          notification.type,
-                        ),
-                    },
-                  ]}>
-                  <Text style={styles.notificationIcon}>
-                    {getNotificationIcon(notification.type)}
-                  </Text>
-                </View>
-
-                <View style={styles.notificationContent}>
-                  <View style={styles.notificationTopRow}>
-                    <View style={styles.titleContainer}>
-                      <Text
-                        style={[
-                          styles.notificationTitle,
-                          !notification.read &&
-                            styles.notificationTitleUnread,
-                        ]}>
-                        {notification.title}
-                      </Text>
-
-                      <Text style={styles.notificationType}>
-                        {getNotificationLabel(
-                          notification.type,
-                        )}
-                      </Text>
-                    </View>
-
-                    {!notification.read && (
-                      <View style={styles.unreadDot} />
-                    )}
-                  </View>
-
-                  <Text style={styles.notificationMessage}>
-                    {notification.message}
-                  </Text>
-
-                  <View style={styles.notificationBottomRow}>
-                    <Text style={styles.notificationTime}>
-                      {notification.time}
-                    </Text>
-
-                    {notification.deliveryId && (
-                      <Text style={styles.deliveryReference}>
-                        #{notification.deliveryId}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-              </Pressable>
-            ))
-          )}
-
-          <View style={styles.bottomSpacing} />
+          <View style={styles.bottomScrollSpace} />
         </ScrollView>
+
+        <View style={styles.bottomNavigation}>
+          <BottomNavItem label="Home" active={false} onPress={handleGoHome} />
+
+          <BottomNavItem
+            label="Deliveries"
+            active={false}
+            onPress={handleGoDeliveries}
+          />
+
+          <BottomNavItem
+            label="Earnings"
+            active={false}
+            onPress={handleGoEarnings}
+          />
+
+          <BottomNavItem
+            label="Notifications"
+            active={true}
+            notification
+            onPress={() => {}}
+          />
+
+          <BottomNavItem
+            label="Profile"
+            active={false}
+            onPress={handleGoProfile}
+          />
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -423,266 +691,1218 @@ const NotificationsScreen = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F7F9F7',
+
+    backgroundColor: '#FFFFFF',
   },
 
   container: {
     flex: 1,
+
+    backgroundColor: '#FFFFFF',
+  },
+
+  mainScroll: {
+    flex: 1,
+  },
+
+  mainScrollContent: {
+    paddingBottom: 12,
   },
 
   header: {
+    minHeight: 82,
+
+    paddingHorizontal: 16,
+
+    paddingTop: 4,
+
+    paddingBottom: 5,
+
     flexDirection: 'row',
+
     alignItems: 'center',
+
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5EAE5',
   },
 
-  headerTextContainer: {
+  brandContainer: {
     flex: 1,
   },
 
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-
-  headerSubtitle: {
-    marginTop: 5,
-    fontSize: 13,
-    color: '#6B7280',
-  },
-
-  unreadBadge: {
-    minWidth: 30,
-    height: 30,
-    paddingHorizontal: 8,
-    borderRadius: 15,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 12,
-  },
-
-  unreadBadgeText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-
-  filterRow: {
+  brandRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
+
+    alignItems: 'flex-start',
   },
 
-  filterButton: {
-    minHeight: 40,
-    paddingHorizontal: 17,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#DDE3DD',
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
+  leafIcon: {
+    width: 36,
+
+    height: 36,
+
     alignItems: 'center',
+
     justifyContent: 'center',
+
+    marginRight: 3,
   },
 
-  filterButtonActive: {
-    backgroundColor: '#2E7D32',
-    borderColor: '#2E7D32',
+  leafIconText: {
+    fontSize: 28,
+
+    fontWeight: '800',
+
+    color: '#18A84D',
+
+    transform: [
+      {
+        rotate: '-17deg',
+      },
+    ],
   },
 
-  filterButtonText: {
+  brandText: {
+    fontSize: 26,
+
+    lineHeight: 28,
+
+    fontWeight: '800',
+
+    color: '#07553E',
+  },
+
+  brandGreen: {
+    color: '#20B94E',
+  },
+
+  nepalText: {
+    alignSelf: 'flex-end',
+
+    marginTop: -2,
+
+    marginRight: 3,
+
+    fontSize: 14,
+
+    lineHeight: 15,
+
+    fontWeight: '700',
+
+    color: '#07553E',
+  },
+
+  partnerText: {
+    marginTop: 3,
+
+    marginLeft: 4,
+
     fontSize: 13,
+
+    lineHeight: 17,
+
     fontWeight: '600',
-    color: '#5F6B61',
+
+    color: '#39725D',
   },
 
-  filterButtonTextActive: {
-    color: '#FFFFFF',
-  },
+  headerActions: {
+    flexDirection: 'row',
 
-  filterCountBadge: {
-    minWidth: 20,
-    height: 20,
-    marginLeft: 7,
-    paddingHorizontal: 5,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
-    justifyContent: 'center',
+
+    marginLeft: 8,
   },
 
-  filterCountBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#2E7D32',
+  headerBellButton: {
+    width: 40,
+
+    height: 40,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    position: 'relative',
+
+    marginRight: 9,
+  },
+
+  headerBellBody: {
+    width: 19,
+
+    height: 20,
+
+    borderWidth: 2,
+
+    borderColor: '#0B604C',
+
+    borderTopLeftRadius: 10,
+
+    borderTopRightRadius: 10,
+
+    borderBottomLeftRadius: 4,
+
+    borderBottomRightRadius: 4,
+  },
+
+  headerBellBottom: {
+    width: 24,
+
+    height: 2,
+
+    borderRadius: 2,
+
+    backgroundColor: '#0B604C',
+
+    marginTop: -1,
+  },
+
+  headerBellClapper: {
+    width: 6,
+
+    height: 5,
+
+    borderRadius: 3,
+
+    backgroundColor: '#0B604C',
+
+    marginTop: 2,
+  },
+
+  headerNotificationDot: {
+    position: 'absolute',
+
+    top: 0,
+
+    right: 0,
+
+    width: 12,
+
+    height: 12,
+
+    borderRadius: 6,
+
+    backgroundColor: '#F04444',
+
+    borderWidth: 2,
+
+    borderColor: '#FFFFFF',
+  },
+
+  profileButton: {
+    width: 46,
+
+    height: 46,
+
+    borderRadius: 23,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    backgroundColor: '#DDEDE3',
+
+    position: 'relative',
+  },
+
+  profileText: {
+    fontSize: 14,
+
+    fontWeight: '800',
+
+    color: '#07553E',
+  },
+
+  onlineDot: {
+    position: 'absolute',
+
+    right: -1,
+
+    bottom: 0,
+
+    width: 12,
+
+    height: 12,
+
+    borderRadius: 6,
+
+    backgroundColor: '#21B34B',
+
+    borderWidth: 2,
+
+    borderColor: '#FFFFFF',
+  },
+
+  titleRow: {
+    minHeight: 55,
+
+    paddingHorizontal: 16,
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    justifyContent: 'space-between',
+  },
+
+  pageTitle: {
+    fontSize: 30,
+
+    lineHeight: 35,
+
+    fontWeight: '800',
+
+    color: '#111827',
   },
 
   markAllButton: {
-    marginLeft: 'auto',
-    paddingVertical: 8,
-    paddingLeft: 10,
+    height: 38,
+
+    paddingHorizontal: 13,
+
+    borderRadius: 19,
+
+    backgroundColor: '#EAF8EE',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
   },
 
-  markAllButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#2E7D32',
+  markAllCheck: {
+    fontSize: 17,
+
+    lineHeight: 18,
+
+    fontWeight: '800',
+
+    color: '#0E8F45',
+
+    marginRight: 6,
   },
 
-  scrollContent: {
+  markAllText: {
+    fontSize: 11,
+
+    lineHeight: 14,
+
+    fontWeight: '700',
+
+    color: '#17221B',
+  },
+
+  markAllTextDisabled: {
+    color: '#9AA19C',
+  },
+
+  filterRow: {
     paddingHorizontal: 16,
-    paddingTop: 14,
+
+    paddingTop: 7,
+
+    paddingBottom: 9,
+  },
+
+  filterPill: {
+    height: 34,
+
+    paddingHorizontal: 11,
+
+    borderRadius: 17,
+
+    backgroundColor: '#F2F4F5',
+
+    marginRight: 7,
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+  },
+
+  filterPillActive: {
+    backgroundColor: '#079741',
+  },
+
+  filterIcon: {
+    marginRight: 5,
+
+    fontSize: 13,
+
+    lineHeight: 15,
+
+    fontWeight: '800',
+
+    color: '#168648',
+  },
+
+  filterIconActive: {
+    color: '#FFFFFF',
+  },
+
+  filterText: {
+    fontSize: 10,
+
+    lineHeight: 13,
+
+    fontWeight: '700',
+
+    color: '#555E59',
+  },
+
+  filterTextActive: {
+    color: '#FFFFFF',
+  },
+
+  filterBadge: {
+    minWidth: 18,
+
+    height: 18,
+
+    marginLeft: 6,
+
+    paddingHorizontal: 4,
+
+    borderRadius: 9,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    backgroundColor: '#F04444',
+  },
+
+  filterBadgeText: {
+    fontSize: 9,
+
+    lineHeight: 11,
+
+    fontWeight: '800',
+
+    color: '#FFFFFF',
+  },
+
+  notificationArea: {
+    paddingHorizontal: 16,
+
+    paddingTop: 0,
+  },
+
+  section: {
+    marginBottom: 5,
+  },
+
+  sectionTitle: {
+    marginTop: 6,
+
+    marginBottom: 8,
+
+    fontSize: 21,
+
+    lineHeight: 25,
+
+    fontWeight: '800',
+
+    color: '#111827',
   },
 
   notificationCard: {
-    flexDirection: 'row',
+    minHeight: 84,
+
+    marginBottom: 9,
+
+    paddingHorizontal: 12,
+
+    paddingVertical: 9,
+
+    borderRadius: 15,
+
     backgroundColor: '#FFFFFF',
+
     borderWidth: 1,
-    borderColor: '#E5EAE5',
-    borderRadius: 16,
-    padding: 15,
-    marginBottom: 12,
-  },
 
-  notificationCardUnread: {
-    borderColor: '#C8E6C9',
-    backgroundColor: '#FBFFFB',
-  },
+    borderColor: '#E9ECEA',
 
-  iconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-
-  notificationIcon: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#2E7D32',
-  },
-
-  notificationContent: {
-    flex: 1,
-  },
-
-  notificationTopRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+
+    alignItems: 'center',
   },
 
-  titleContainer: {
+  notificationCardGreen: {
+    minHeight: 84,
+
+    marginBottom: 9,
+
+    paddingHorizontal: 12,
+
+    paddingVertical: 9,
+
+    borderRadius: 15,
+
+    backgroundColor: '#F1FAF2',
+
+    borderWidth: 1,
+
+    borderColor: '#E5F0E6',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+  },
+
+  notificationCardOrange: {
+    minHeight: 84,
+
+    marginBottom: 9,
+
+    paddingHorizontal: 12,
+
+    paddingVertical: 9,
+
+    borderRadius: 15,
+
+    backgroundColor: '#FFF8EC',
+
+    borderWidth: 1,
+
+    borderColor: '#FFF0D7',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+  },
+
+  notificationCardBlue: {
+    minHeight: 84,
+
+    marginBottom: 9,
+
+    paddingHorizontal: 12,
+
+    paddingVertical: 9,
+
+    borderRadius: 15,
+
+    backgroundColor: '#F2F7FD',
+
+    borderWidth: 1,
+
+    borderColor: '#E5EFFA',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+  },
+
+  iconCircle: {
+    width: 45,
+
+    height: 45,
+
+    borderRadius: 23,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    marginRight: 10,
+  },
+
+  iconCircleGreen: {
+    backgroundColor: '#DDF4E2',
+  },
+
+  iconCircleOrange: {
+    backgroundColor: '#FFF0D6',
+  },
+
+  iconCircleBlue: {
+    backgroundColor: '#DDEEFF',
+  },
+
+  iconCirclePurple: {
+    backgroundColor: '#EEE5FF',
+  },
+
+  iconCircleRed: {
+    backgroundColor: '#FFE3E3',
+  },
+
+  packageIcon: {
+    width: 24,
+
+    height: 24,
+
+    position: 'relative',
+  },
+
+  packageTop: {
+    position: 'absolute',
+
+    top: 1,
+
+    left: 4,
+
+    width: 17,
+
+    height: 8,
+
+    borderWidth: 2,
+
+    borderColor: '#159447',
+
+    transform: [
+      {
+        rotate: '30deg',
+      },
+    ],
+  },
+
+  packageLeft: {
+    position: 'absolute',
+
+    left: 1,
+
+    top: 8,
+
+    width: 11,
+
+    height: 14,
+
+    borderWidth: 2,
+
+    borderColor: '#159447',
+
+    transform: [
+      {
+        skewY: '-25deg',
+      },
+    ],
+  },
+
+  packageRight: {
+    position: 'absolute',
+
+    right: 1,
+
+    top: 8,
+
+    width: 11,
+
+    height: 14,
+
+    borderWidth: 2,
+
+    borderColor: '#159447',
+
+    transform: [
+      {
+        skewY: '25deg',
+      },
+    ],
+  },
+
+  bellSmall: {
+    width: 24,
+
+    height: 26,
+
+    alignItems: 'center',
+
+    justifyContent: 'flex-end',
+  },
+
+  bellTop: {
+    width: 18,
+
+    height: 18,
+
+    borderWidth: 2,
+
+    borderColor: '#F28B10',
+
+    borderTopLeftRadius: 10,
+
+    borderTopRightRadius: 10,
+
+    borderBottomLeftRadius: 4,
+
+    borderBottomRightRadius: 4,
+  },
+
+  bellBottom: {
+    width: 23,
+
+    height: 2,
+
+    backgroundColor: '#F28B10',
+
+    borderRadius: 2,
+
+    marginTop: -1,
+  },
+
+  bellClapperSmall: {
+    width: 5,
+
+    height: 5,
+
+    borderRadius: 3,
+
+    backgroundColor: '#F28B10',
+
+    marginTop: 2,
+  },
+
+  walletSmall: {
+    width: 27,
+
+    height: 24,
+
+    position: 'relative',
+  },
+
+  walletBodySmall: {
+    position: 'absolute',
+
+    left: 2,
+
+    bottom: 2,
+
+    width: 23,
+
+    height: 17,
+
+    borderWidth: 2,
+
+    borderColor: '#1877D4',
+
+    borderRadius: 4,
+  },
+
+  walletPocketSmall: {
+    position: 'absolute',
+
+    right: 0,
+
+    bottom: 6,
+
+    width: 9,
+
+    height: 8,
+
+    borderWidth: 2,
+
+    borderColor: '#1877D4',
+
+    borderRadius: 3,
+  },
+
+  walletDotSmall: {
+    position: 'absolute',
+
+    right: 4,
+
+    bottom: 9,
+
+    width: 4,
+
+    height: 4,
+
+    borderRadius: 2,
+
+    backgroundColor: '#1877D4',
+  },
+
+  exclamationIcon: {
+    fontSize: 27,
+
+    lineHeight: 29,
+
+    fontWeight: '800',
+
+    color: '#F04444',
+  },
+
+  checkIcon: {
+    fontSize: 27,
+
+    lineHeight: 29,
+
+    fontWeight: '800',
+
+    color: '#16A04A',
+  },
+
+  infoIcon: {
+    fontSize: 24,
+
+    lineHeight: 27,
+
+    fontWeight: '800',
+
+    color: '#1877D4',
+  },
+
+  giftIcon: {
+    fontSize: 19,
+  },
+
+  locationPinSmall: {
+    width: 23,
+
+    height: 23,
+
+    borderRadius: 13,
+
+    backgroundColor: '#F28B10',
+
+    transform: [
+      {
+        rotate: '45deg',
+      },
+    ],
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+  },
+
+  locationPinCenter: {
+    width: 7,
+
+    height: 7,
+
+    borderRadius: 4,
+
+    backgroundColor: '#FFFFFF',
+  },
+
+  cardContent: {
     flex: 1,
-    paddingRight: 8,
+
+    paddingRight: 5,
   },
 
   notificationTitle: {
-    fontSize: 15,
+    fontSize: 13,
+
+    lineHeight: 18,
+
     fontWeight: '600',
-    color: '#374151',
-    lineHeight: 20,
+
+    color: '#22272B',
   },
 
   notificationTitleUnread: {
-    fontWeight: '700',
-    color: '#1F2937',
-  },
+    fontWeight: '800',
 
-  notificationType: {
-    marginTop: 4,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    color: '#2E7D32',
-  },
-
-  unreadDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: '#2E7D32',
-    marginTop: 5,
+    color: '#111827',
   },
 
   notificationMessage: {
-    marginTop: 9,
-    fontSize: 13,
-    lineHeight: 19,
-    color: '#6B7280',
+    marginTop: 3,
+
+    fontSize: 10,
+
+    lineHeight: 15,
+
+    color: '#6F777C',
   },
 
-  notificationBottomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 10,
+  cardRight: {
+    width: 70,
+
+    minHeight: 62,
+
+    alignItems: 'flex-end',
+
+    justifyContent: 'center',
   },
 
   notificationTime: {
-    fontSize: 11,
-    color: '#9CA3AF',
+    maxWidth: 68,
+
+    fontSize: 9,
+
+    lineHeight: 13,
+
+    color: '#70787D',
+
+    textAlign: 'right',
   },
 
-  deliveryReference: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#6B7280',
+  unreadDot: {
+    width: 7,
+
+    height: 7,
+
+    marginTop: 4,
+
+    marginBottom: 1,
+
+    borderRadius: 4,
+
+    backgroundColor: '#16A04A',
+  },
+
+  chevron: {
+    marginTop: 0,
+
+    fontSize: 24,
+
+    lineHeight: 24,
+
+    fontWeight: '300',
+
+    color: '#9BA2A6',
   },
 
   emptyState: {
     alignItems: 'center',
+
     justifyContent: 'center',
+
     paddingHorizontal: 30,
-    paddingTop: 100,
+
+    paddingTop: 80,
   },
 
-  emptyIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  emptyIconCircle: {
+    width: 68,
+
+    height: 68,
+
+    borderRadius: 34,
+
     alignItems: 'center',
+
     justifyContent: 'center',
-    backgroundColor: '#E8F5E9',
-    marginBottom: 18,
+
+    backgroundColor: '#E6F6E9',
+
+    marginBottom: 14,
   },
 
   emptyIcon: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#2E7D32',
+    fontSize: 29,
+
+    fontWeight: '800',
+
+    color: '#2E8B57',
   },
 
   emptyTitle: {
     fontSize: 18,
-    fontWeight: '700',
+
+    fontWeight: '800',
+
     color: '#1F2937',
+
     textAlign: 'center',
   },
 
   emptyDescription: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 20,
-    color: '#6B7280',
+    marginTop: 7,
+
+    fontSize: 12,
+
+    lineHeight: 18,
+
+    color: '#737B80',
+
     textAlign: 'center',
   },
 
-  bottomSpacing: {
-    height: 30,
+  bottomNavigation: {
+    height: 73,
+
+    paddingHorizontal: 4,
+
+    paddingTop: 4,
+
+    paddingBottom: 4,
+
+    backgroundColor: '#FFFFFF',
+
+    borderTopWidth: 1,
+
+    borderTopColor: '#E7EAE8',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    justifyContent: 'space-around',
+  },
+
+  bottomNavItem: {
+    flex: 1,
+
+    height: 64,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+  },
+
+  bottomIconWrapper: {
+    width: 29,
+
+    height: 28,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    position: 'relative',
+  },
+
+  bottomNavLabel: {
+    marginTop: 4,
+
+    fontSize: 9,
+
+    lineHeight: 12,
+
+    color: '#697277',
+
+    fontWeight: '600',
+  },
+
+  bottomNavLabelActive: {
+    color: '#079447',
+
+    fontWeight: '800',
+  },
+
+  bottomNotificationDot: {
+    position: 'absolute',
+
+    top: -1,
+
+    right: 1,
+
+    width: 9,
+
+    height: 9,
+
+    borderRadius: 5,
+
+    backgroundColor: '#F04444',
+
+    borderWidth: 1.5,
+
+    borderColor: '#FFFFFF',
+  },
+
+  navIconBox: {
+    width: 24,
+
+    height: 24,
+
+    alignItems: 'center',
+
+    justifyContent: 'flex-end',
+  },
+
+  homeIconRoof: {
+    position: 'absolute',
+
+    top: 2,
+
+    width: 17,
+
+    height: 17,
+
+    borderTopWidth: 2,
+
+    borderLeftWidth: 2,
+
+    transform: [
+      {
+        rotate: '45deg',
+      },
+    ],
+  },
+
+  homeIconBody: {
+    width: 19,
+
+    height: 16,
+
+    borderWidth: 2,
+
+    borderTopWidth: 0,
+
+    alignItems: 'center',
+
+    justifyContent: 'flex-end',
+  },
+
+  homeIconDoor: {
+    width: 5,
+
+    height: 8,
+
+    borderTopLeftRadius: 2,
+
+    borderTopRightRadius: 2,
+  },
+
+  boxIcon: {
+    width: 21,
+
+    height: 21,
+
+    borderWidth: 2,
+
+    borderRadius: 2,
+
+    position: 'relative',
+  },
+
+  boxIconLine: {
+    position: 'absolute',
+
+    top: 7,
+
+    left: 2,
+
+    right: 2,
+
+    height: 2,
+  },
+
+  walletIcon: {
+    width: 23,
+
+    height: 17,
+
+    borderWidth: 2,
+
+    borderRadius: 4,
+
+    position: 'relative',
+  },
+
+  walletPocket: {
+    position: 'absolute',
+
+    right: -2,
+
+    top: 4,
+
+    width: 9,
+
+    height: 7,
+
+    borderWidth: 2,
+
+    borderRadius: 3,
+  },
+
+  walletDot: {
+    position: 'absolute',
+
+    right: 2,
+
+    top: 6,
+
+    width: 3,
+
+    height: 3,
+
+    borderRadius: 2,
+  },
+
+  navBell: {
+    width: 23,
+
+    height: 25,
+
+    alignItems: 'center',
+
+    justifyContent: 'flex-end',
+  },
+
+  navBellBody: {
+    width: 18,
+
+    height: 17,
+
+    borderWidth: 2,
+
+    borderTopLeftRadius: 10,
+
+    borderTopRightRadius: 10,
+
+    borderBottomLeftRadius: 4,
+
+    borderBottomRightRadius: 4,
+  },
+
+  navBellBottom: {
+    width: 22,
+
+    height: 2,
+
+    borderRadius: 2,
+
+    marginTop: -1,
+  },
+
+  navBellClapper: {
+    width: 5,
+
+    height: 4,
+
+    borderRadius: 2,
+
+    marginTop: 2,
+  },
+
+  profileNavIcon: {
+    width: 24,
+
+    height: 25,
+
+    alignItems: 'center',
+
+    justifyContent: 'flex-end',
+  },
+
+  profileHead: {
+    width: 9,
+
+    height: 9,
+
+    borderRadius: 5,
+
+    borderWidth: 2,
+  },
+
+  profileShoulders: {
+    width: 20,
+
+    height: 11,
+
+    marginTop: 3,
+
+    borderWidth: 2,
+
+    borderTopLeftRadius: 10,
+
+    borderTopRightRadius: 10,
+
+    borderBottomWidth: 0,
+  },
+
+  bottomScrollSpace: {
+    height: 10,
   },
 });
 

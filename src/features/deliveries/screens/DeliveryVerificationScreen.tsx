@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
-
+import React, {useEffect, useRef, useState} from 'react';
 import {
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,36 +9,32 @@ import {
   TextInput,
   View,
 } from 'react-native';
-
-import { SafeAreaView } from 'react-native-safe-area-context';
-
+import {SafeAreaView} from 'react-native-safe-area-context';
 import {
   useIsFocused,
   useNavigation,
 } from '@react-navigation/native';
-
 import type {
   NativeStackNavigationProp,
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
-
 import {
   Camera,
   useCameraDevice,
   useCameraPermission,
 } from 'react-native-vision-camera';
-
+import {useBarcodeScannerOutput} from 'react-native-vision-camera-barcode-scanner';
+import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
 import {
-  useBarcodeScannerOutput,
-} from 'react-native-vision-camera-barcode-scanner';
+  completeDelivery,
+  getDelivery,
+  type OrderRecord,
+} from '../../../shared/services/api';
 
-import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
-
-type DeliveryVerificationScreenProps =
-  NativeStackScreenProps<
-    MainStackParamList,
-    'DeliveryVerification'
-  >;
+type DeliveryVerificationScreenProps = NativeStackScreenProps<
+  MainStackParamList,
+  'DeliveryVerification'
+>;
 
 type DeliveryVerificationNavigationProp =
   NativeStackNavigationProp<MainStackParamList>;
@@ -50,8 +46,33 @@ function DeliveryVerificationScreen({
     useNavigation<DeliveryVerificationNavigationProp>();
 
   const isFocused = useIsFocused();
+  const {deliveryId} = route.params;
+  const [deliveryOrder, setDeliveryOrder] = useState<OrderRecord | null>(null);
 
-  const { deliveryId } = route.params;
+  useEffect(() => {
+    let active = true;
+    getDelivery(deliveryId.replace(/^#/, ''))
+      .then(order => {
+        if (active) {
+          setDeliveryOrder(order);
+          setOtpVerified(Boolean(order.deliveryVerification?.isVerified));
+        }
+      })
+      .catch(error => {
+        if (active) {
+          Alert.alert(
+            'Delivery unavailable',
+            error instanceof Error ? error.message : 'Unable to load this delivery.',
+          );
+        }
+      });
+    return () => { active = false; };
+  }, [deliveryId]);
+
+  // DailyMart order number is the identifier printed on the warehouse package label.
+  const expectedPackageId = deliveryOrder?.orderNumber?.trim().toUpperCase();
+  const customerName = deliveryOrder?.deliveryLocation?.name || deliveryOrder?.customer?.fullName || 'Customer';
+  const customerPhone = deliveryOrder?.deliveryLocation?.phone || deliveryOrder?.customer?.mobileNumber || '';
 
   const {
     hasPermission,
@@ -61,40 +82,23 @@ function DeliveryVerificationScreen({
 
   const device = useCameraDevice('back');
 
-  const [packageVerified, setPackageVerified] =
-    useState(false);
-
-  const [isScannerVisible, setIsScannerVisible] =
-    useState(false);
-
-  const [isScanning, setIsScanning] =
-    useState(false);
-
-  const [cameraReady, setCameraReady] =
-    useState(false);
-
-  const [scannedCode, setScannedCode] =
-    useState<string | null>(null);
-
-  const [cameraError, setCameraError] =
-    useState<string | null>(null);
-
+  const [packageVerified, setPackageVerified] = useState(false);
+  const [isScannerVisible, setIsScannerVisible] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [scannedCode, setScannedCode] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [otp, setOtp] = useState('');
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [isOtpSubmitting, setIsOtpSubmitting] = useState(false);
 
-  const [otpVerified, setOtpVerified] =
-    useState(false);
-
-  /*
-   * --------------------------------------------------
-   * Camera lifecycle
-   * --------------------------------------------------
-   */
+  // Prevent the same barcode from being processed more than once.
+  const scanHandledRef = useRef(false);
 
   useEffect(() => {
     if (!isScannerVisible) {
       setCameraReady(false);
       setCameraError(null);
-
       return;
     }
 
@@ -109,13 +113,15 @@ function DeliveryVerificationScreen({
     };
   }, [isScannerVisible]);
 
-  /*
-   * --------------------------------------------------
-   * Open scanner
-   * --------------------------------------------------
-   */
-
   const handleOpenScanner = async () => {
+    if (!expectedPackageId) {
+      Alert.alert(
+        'Order label unavailable',
+        'Load this delivery from DailyMart before scanning its order number.',
+      );
+      return;
+    }
+    scanHandledRef.current = false;
     setScannedCode(null);
     setCameraError(null);
     setCameraReady(false);
@@ -126,32 +132,21 @@ function DeliveryVerificationScreen({
         setCameraError(
           'Camera permission is blocked. Please enable camera access from your device settings.',
         );
-
         setIsScannerVisible(true);
-
         return;
       }
 
       try {
-        const granted =
-          await requestPermission();
+        const granted = await requestPermission();
 
         if (!granted) {
-          setCameraError(
-            'Camera permission was not granted.',
-          );
-
+          setCameraError('Camera permission was not granted.');
           setIsScannerVisible(true);
-
           return;
         }
       } catch {
-        setCameraError(
-          'We could not request camera permission.',
-        );
-
+        setCameraError('We could not request camera permission.');
         setIsScannerVisible(true);
-
         return;
       }
     }
@@ -159,24 +154,13 @@ function DeliveryVerificationScreen({
     setIsScannerVisible(true);
   };
 
-  /*
-   * --------------------------------------------------
-   * Close scanner
-   * --------------------------------------------------
-   */
-
   const handleCloseScanner = () => {
+    scanHandledRef.current = false;
     setIsScanning(false);
     setCameraReady(false);
     setIsScannerVisible(false);
     setCameraError(null);
   };
-
-  /*
-   * --------------------------------------------------
-   * Barcode detected
-   * --------------------------------------------------
-   */
 
   const handleBarcodeScanned = (
     barcodes: Array<{
@@ -187,6 +171,7 @@ function DeliveryVerificationScreen({
   ) => {
     if (
       !isScanning ||
+      scanHandledRef.current ||
       barcodes.length === 0
     ) {
       return;
@@ -194,76 +179,72 @@ function DeliveryVerificationScreen({
 
     const firstBarcode = barcodes[0];
 
-    const value =
-      firstBarcode.rawValue ??
-      firstBarcode.displayValue ??
-      '';
+    const value = (
+      firstBarcode.rawValue?.trim() ||
+      firstBarcode.displayValue?.trim() ||
+      ''
+    ).trim();
 
     if (!value) {
+      scanHandledRef.current = true;
+      setIsScanning(false);
+
+      Alert.alert(
+        'Unreadable Barcode',
+        'No readable package ID was found. Please open the scanner and try again.',
+      );
       return;
     }
 
+    scanHandledRef.current = true;
     setIsScanning(false);
     setCameraReady(false);
-    setScannedCode(value);
-    setPackageVerified(true);
     setIsScannerVisible(false);
+    setScannedCode(value);
 
-    /*
-     * Temporary frontend behavior.
-     *
-     * The backend will later validate:
-     * - partner
-     * - order
-     * - package
-     * - delivery state
-     */
+    // Never accept a scanned package if the expected ID is missing.
+    if (!expectedPackageId) {
+      setPackageVerified(false);
+
+      Alert.alert(
+        'Package ID Unavailable',
+        'The expected package ID is not available for this delivery. Refresh the delivery details or contact the administrator.',
+      );
+      return;
+    }
+
+    // Compare the scanned value with the expected ID, ignoring letter case.
+    if (value.toUpperCase() !== expectedPackageId) {
+      setPackageVerified(false);
+
+      Alert.alert(
+        'Package Mismatch',
+        'This package does not belong to the assigned delivery. Please check the label and scan the correct package.',
+      );
+      return;
+    }
+
+    setPackageVerified(true);
 
     Alert.alert(
-      'Package Code Detected',
-      `Scanned value:\n${value}`,
+      'Package Matched',
+      'The scanned package ID matches the expected package ID.',
     );
   };
 
-  /*
-   * --------------------------------------------------
-   * Barcode scanner error
-   * --------------------------------------------------
-   */
-
-  const handleScannerError = (
-    error: Error,
-  ) => {
+  const handleScannerError = (error: Error) => {
     setIsScanning(false);
-
     setCameraError(
-      error.message ||
-        'The barcode scanner could not be started.',
+      error.message || 'The barcode scanner could not be started.',
     );
   };
 
-  /*
-   * --------------------------------------------------
-   * Camera error
-   * --------------------------------------------------
-   */
-
-  const handleCameraError = (
-    error: Error,
-  ) => {
+  const handleCameraError = (error: Error) => {
     setIsScanning(false);
-
     setCameraError(
-      error.message ||
-        'The camera could not be started.',
+      error.message || 'The camera could not be started.',
     );
   };
-
-  /*
-   * --------------------------------------------------
-   * Camera started
-   * --------------------------------------------------
-   */
 
   const handleCameraStarted = () => {
     if (isScannerVisible) {
@@ -272,17 +253,11 @@ function DeliveryVerificationScreen({
     }
   };
 
-  /*
-   * --------------------------------------------------
-   * Retry camera
-   * --------------------------------------------------
-   */
-
   const handleRetryCamera = () => {
+    scanHandledRef.current = false;
     setCameraError(null);
     setIsScanning(false);
     setCameraReady(false);
-
     setIsScannerVisible(false);
 
     setTimeout(() => {
@@ -290,127 +265,88 @@ function DeliveryVerificationScreen({
     }, 200);
   };
 
-  /*
-   * --------------------------------------------------
-   * Retry package scan
-   * --------------------------------------------------
-   */
-
   const handleRetryScan = () => {
+    scanHandledRef.current = false;
     setScannedCode(null);
     setPackageVerified(false);
     setCameraError(null);
     setCameraReady(false);
     setIsScanning(false);
-    setOtp('');
-    setOtpVerified(false);
   };
 
-  /*
-   * --------------------------------------------------
-   * OTP
-   * --------------------------------------------------
-   */
-
-  const handleOtpChange = (
-    value: string,
-  ) => {
-    const numericValue =
-      value.replace(/\D/g, '');
-
-    setOtp(
-      numericValue.slice(0, 6),
-    );
+  // Allow only numeric characters and a maximum of six digits.
+  const handleOtpChange = (value: string) => {
+    const numericValue = value.replace(/\D/g, '');
+    setOtp(numericValue.slice(0, 6));
 
     if (otpVerified) {
       setOtpVerified(false);
     }
   };
 
-  const handleVerifyOtp = () => {
-    if (otp.length !== 6) {
-      Alert.alert(
-        'Invalid OTP',
-        'Please enter the 6-digit customer OTP.',
-      );
-
+  const handleVerifyOtp = async () => {
+    if (!/^\d{6}$/.test(otp)) {
+      Alert.alert('Invalid OTP', 'Please enter the 6-digit customer OTP.');
       return;
     }
-
-    /*
-     * Temporary frontend simulation.
-     *
-     * Backend validation will become
-     * authoritative later.
-     */
-
-    setOtpVerified(true);
+    if (isOtpSubmitting) return;
+    setIsOtpSubmitting(true);
+    try {
+      await completeDelivery(deliveryId, otp);
+      setOtpVerified(true);
+      Alert.alert('Customer verified', 'The OTP was verified by DailyMart. Record any cash-on-delivery payment before completing the order.');
+    } catch (error) {
+      Alert.alert('OTP verification failed', error instanceof Error ? error.message : 'Please check the code and retry.');
+    } finally {
+      setIsOtpSubmitting(false);
+    }
   };
+  const allVerified = otpVerified;
 
-  /*
-   * --------------------------------------------------
-   * Back to active delivery
-   * --------------------------------------------------
-   */
+  const handleCallCustomer = async () => {
+    if (!customerPhone) {
+      Alert.alert('Phone unavailable', 'This order does not include a customer phone number.');
+      return;
+    }
+    try {
+      await Linking.openURL(`tel:${customerPhone}`);
+    } catch {
+      Alert.alert('Unable to call', 'Your device could not open the phone app.');
+    }
+  };
 
   const handleBackToDelivery = () => {
     navigation.goBack();
   };
 
-  /*
-   * --------------------------------------------------
-   * Proceed to COD collection
-   * --------------------------------------------------
-   */
-
-  const handleProceedToCODCollection = () => {
+  const handleProceedToPayment = () => {
     if (!allVerified) {
       return;
     }
 
+    // The backend OTP check above is the source of truth.
     navigation.navigate('CODCollection', {
       deliveryId,
     });
   };
 
-  const allVerified =
-    packageVerified &&
-    otpVerified;
-
-  /*
-   * --------------------------------------------------
-   * Barcode Scanner Camera Output
-   * --------------------------------------------------
-   */
-
-  const barcodeScannerOutput =
-    useBarcodeScannerOutput({
-      barcodeFormats: [
-        'qr-code',
-        'code-128',
-        'code-39',
-        'code-93',
-        'ean-13',
-        'ean-8',
-        'upc-a',
-        'upc-e',
-        'itf',
-        'codabar',
-      ],
-
-      outputResolution: 'preview',
-
-      onBarcodeScanned:
-        handleBarcodeScanned,
-
-      onError: handleScannerError,
-    });
-
-  /*
-   * --------------------------------------------------
-   * Scanner state
-   * --------------------------------------------------
-   */
+  const barcodeScannerOutput = useBarcodeScannerOutput({
+    barcodeFormats: [
+      'qr-code',
+      'code-128',
+      'code-39',
+      'code-93',
+      'ean-13',
+      'ean-8',
+      'upc-a',
+      'upc-e',
+      'itf',
+      'codabar',
+    ],
+    outputResolution: 'preview',
+    onBarcodeScanned: handleBarcodeScanned,
+    onError: handleScannerError,
+  });
 
   const scannerActive =
     isScannerVisible &&
@@ -419,48 +355,25 @@ function DeliveryVerificationScreen({
     cameraReady &&
     device !== undefined;
 
-  /*
-   * --------------------------------------------------
-   * Full-screen scanner
-   * --------------------------------------------------
-   */
-
   if (isScannerVisible) {
     return (
       <SafeAreaView
         style={styles.cameraScreen}
-        edges={['top', 'bottom']}
-      >
+        edges={['top', 'bottom']}>
         <View style={styles.cameraHeader}>
           <View>
-            <Text
-              style={
-                styles.cameraHeaderLabel
-              }
-            >
+            <Text style={styles.cameraHeaderLabel}>
               PACKAGE SCANNER
             </Text>
-
-            <Text
-              style={
-                styles.cameraHeaderOrder
-              }
-            >
+            <Text style={styles.cameraHeaderOrder}>
               {deliveryId}
             </Text>
           </View>
 
           <Pressable
-            style={
-              styles.cameraCloseButton
-            }
-            onPress={handleCloseScanner}
-          >
-            <Text
-              style={
-                styles.cameraCloseButtonText
-              }
-            >
+            style={styles.cameraCloseButton}
+            onPress={handleCloseScanner}>
+            <Text style={styles.cameraCloseButtonText}>
               ×
             </Text>
           </Pressable>
@@ -468,241 +381,126 @@ function DeliveryVerificationScreen({
 
         {!hasPermission ? (
           <View style={styles.cameraMessage}>
-            <Text
-              style={
-                styles.cameraMessageIcon
-              }
-            >
-              📷
-            </Text>
+            <Text style={styles.cameraMessageIcon}>📷</Text>
 
-            <Text
-              style={
-                styles.cameraMessageTitle
-              }
-            >
+            <Text style={styles.cameraMessageTitle}>
               Camera Permission Required
             </Text>
 
-            <Text
-              style={
-                styles.cameraMessageDescription
-              }
-            >
-              Camera access is required to scan the
-              package QR code or barcode.
+            <Text style={styles.cameraMessageDescription}>
+              Camera access is required to scan the package QR code or
+              barcode.
             </Text>
 
             {canRequestPermission ? (
               <Pressable
-                style={
-                  styles.primaryButton
-                }
-                onPress={
-                  handleOpenScanner
-                }
-              >
-                <Text
-                  style={
-                    styles.primaryButtonText
-                  }
-                >
+                style={styles.primaryButton}
+                onPress={handleOpenScanner}>
+                <Text style={styles.primaryButtonText}>
                   ALLOW CAMERA
                 </Text>
               </Pressable>
             ) : (
-              <Text
-                style={
-                  styles.permissionSettingsText
-                }
-              >
-                Camera permission is blocked. Please
-                enable camera access from the device
-                settings.
+              <Text style={styles.permissionSettingsText}>
+                Camera permission is blocked. Please enable camera
+                access from device settings.
               </Text>
             )}
 
             <Pressable
-              style={
-                styles.secondaryButton
-              }
-              onPress={
-                handleCloseScanner
-              }
-            >
-              <Text
-                style={
-                  styles.secondaryButtonText
-                }
-              >
+              style={styles.secondaryButton}
+              onPress={handleCloseScanner}>
+              <Text style={styles.secondaryButtonText}>
                 CANCEL
               </Text>
             </Pressable>
           </View>
         ) : device === undefined ? (
           <View style={styles.cameraMessage}>
-            <Text
-              style={
-                styles.cameraMessageIcon
-              }
-            >
-              📷
-            </Text>
+            <Text style={styles.cameraMessageIcon}>📷</Text>
 
-            <Text
-              style={
-                styles.cameraMessageTitle
-              }
-            >
+            <Text style={styles.cameraMessageTitle}>
               Camera Not Available
             </Text>
 
-            <Text
-              style={
-                styles.cameraMessageDescription
-              }
-            >
-              The rear camera device is not currently
-              available on this device.
+            <Text style={styles.cameraMessageDescription}>
+              The rear camera is not currently available on this device.
             </Text>
 
             <Pressable
-              style={
-                styles.secondaryButton
-              }
-              onPress={
-                handleCloseScanner
-              }
-            >
-              <Text
-                style={
-                  styles.secondaryButtonText
-                }
-              >
+              style={styles.secondaryButton}
+              onPress={handleCloseScanner}>
+              <Text style={styles.secondaryButtonText}>
                 CLOSE
               </Text>
             </Pressable>
           </View>
         ) : cameraError !== null ? (
           <View style={styles.cameraMessage}>
-            <View
-              style={styles.errorIcon}
-            >
-              <Text
-                style={styles.errorIconText}
-              >
-                !
-              </Text>
+            <View style={styles.errorIcon}>
+              <Text style={styles.errorIconText}>!</Text>
             </View>
 
-            <Text
-              style={
-                styles.cameraMessageTitle
-              }
-            >
+            <Text style={styles.cameraMessageTitle}>
               Camera Error
             </Text>
 
-            <Text
-              style={
-                styles.cameraMessageDescription
-              }
-            >
+            <Text style={styles.cameraMessageDescription}>
               {cameraError}
             </Text>
 
             <Pressable
-              style={
-                styles.primaryButton
-              }
-              onPress={
-                handleRetryCamera
-              }
-            >
-              <Text
-                style={
-                  styles.primaryButtonText
-                }
-              >
+              style={styles.primaryButton}
+              onPress={handleRetryCamera}>
+              <Text style={styles.primaryButtonText}>
                 TRY AGAIN
               </Text>
             </Pressable>
 
             <Pressable
-              style={
-                styles.secondaryButton
-              }
-              onPress={
-                handleCloseScanner
-              }
-            >
-              <Text
-                style={
-                  styles.secondaryButtonText
-                }
-              >
+              style={styles.secondaryButton}
+              onPress={handleCloseScanner}>
+              <Text style={styles.secondaryButtonText}>
                 CLOSE
               </Text>
             </Pressable>
           </View>
         ) : (
-          <View
-            style={
-              styles.cameraPreviewArea
-            }
-          >
+          <View style={styles.cameraPreviewArea}>
             <Camera
               key={device.id}
-              style={
-                styles.fullScreenCamera
-              }
+              style={styles.fullScreenCamera}
               device={device}
               isActive={scannerActive}
               implementationMode="compatible"
               resizeMode="cover"
-              outputs={[
-                barcodeScannerOutput,
-              ]}
-              onStarted={
-                handleCameraStarted
-              }
-              onError={
-                handleCameraError
-              }
+              outputs={[barcodeScannerOutput]}
+              onStarted={handleCameraStarted}
+              onError={handleCameraError}
             />
 
             <View
               pointerEvents="none"
-              style={
-                styles.cameraOverlay
-              }
-            >
-              <View
-                style={
-                  styles.scanFrame
-                }
-              >
+              style={styles.cameraOverlay}>
+              <View style={styles.scanFrame}>
                 <View
                   style={[
                     styles.corner,
                     styles.cornerTopLeft,
                   ]}
                 />
-
                 <View
                   style={[
                     styles.corner,
                     styles.cornerTopRight,
                   ]}
                 />
-
                 <View
                   style={[
                     styles.corner,
                     styles.cornerBottomLeft,
                   ]}
                 />
-
                 <View
                   style={[
                     styles.corner,
@@ -711,11 +509,7 @@ function DeliveryVerificationScreen({
                 />
               </View>
 
-              <Text
-                style={
-                  styles.scannerInstruction
-                }
-              >
+              <Text style={styles.scannerInstruction}>
                 {cameraReady
                   ? 'Position the package QR code or barcode inside the frame'
                   : 'Starting camera...'}
@@ -723,18 +517,9 @@ function DeliveryVerificationScreen({
             </View>
 
             <Pressable
-              style={
-                styles.cameraBottomButton
-              }
-              onPress={
-                handleCloseScanner
-              }
-            >
-              <Text
-                style={
-                  styles.cameraBottomButtonText
-                }
-              >
+              style={styles.cameraBottomButton}
+              onPress={handleCloseScanner}>
+              <Text style={styles.cameraBottomButtonText}>
                 CLOSE SCANNER
               </Text>
             </Pressable>
@@ -744,596 +529,397 @@ function DeliveryVerificationScreen({
     );
   }
 
-  /*
-   * --------------------------------------------------
-   * Normal Verification Screen
-   * --------------------------------------------------
-   */
-
   return (
     <SafeAreaView
       style={styles.safeArea}
-      edges={[
-        'top',
-        'left',
-        'right',
-      ]}
-    >
+      edges={['top', 'left', 'right']}>
       <ScrollView
-        contentContainerStyle={
-          styles.content
-        }
-        showsVerticalScrollIndicator={
-          false
-        }
-      >
-        {/* Header */}
-
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <View
-            style={
-              styles.headerTextContainer
-            }
-          >
-            <Text
-              style={
-                styles.pageLabel
-              }
-            >
+          <Pressable
+            style={styles.headerBackButton}
+            onPress={handleBackToDelivery}>
+            <Text style={styles.headerBackArrow}>‹</Text>
+          </Pressable>
+
+          <View style={styles.headerTitleBlock}>
+            <Text style={styles.pageTitle}>
               Delivery Verification
             </Text>
-
-            <Text
-              style={
-                styles.orderId
-              }
-            >
+            <Text style={styles.headerOrderId}>
               {deliveryId}
             </Text>
           </View>
 
-          <View
-            style={
-              styles.headerBadge
-            }
-          >
-            <Text
-              style={
-                styles.headerBadgeText
-              }
-            >
-              VERIFICATION
+          <View style={styles.headerHelpBadge}>
+            <Text style={styles.headerHelpText}>
+              Verify
             </Text>
           </View>
         </View>
 
-        {/* Progress */}
-
-        <View
-          style={
-            styles.progressCard
-          }
-        >
-          <View
-            style={
-              styles.progressHeader
-            }
-          >
-            <Text
-              style={
-                styles.progressTitle
-              }
-            >
-              Delivery verification
-            </Text>
-
-            <Text
-              style={
-                styles.progressCount
-              }
-            >
-              {allVerified
-                ? '2 / 2'
-                : packageVerified
-                  ? '1 / 2'
-                  : '0 / 2'}
-            </Text>
-          </View>
-
-          <View
-            style={
-              styles.progressTrack
-            }
-          >
+        <View style={styles.stepProgressCard}>
+          <View style={styles.stepProgressLine}>
             <View
               style={[
-                styles.progressFill,
-                packageVerified &&
-                  styles.progressFillHalf,
-                allVerified &&
-                  styles.progressFillComplete,
-              ]}
-            />
-          </View>
-
-          <Text
-            style={
-              styles.progressDescription
-            }
-          >
-            {allVerified
-              ? 'Package and customer verification are complete.'
-              : packageVerified
-                ? 'Package verified. Now confirm the delivery with the customer OTP.'
-                : 'Verify the package first, then customer verification will become available.'}
-          </Text>
-        </View>
-
-        {/* Package Verification */}
-
-        <View style={styles.card}>
-          <View
-            style={
-              styles.sectionHeader
-            }
-          >
-            <View
-              style={
-                styles.stepNumber
-              }
-            >
-              <Text
-                style={
-                  styles.stepNumberText
-                }
-              >
-                1
+                styles.progressStepCircle,
+                styles.progressStepComplete,
+              ]}>
+              <Text style={styles.progressStepCheck}>
+                ✓
               </Text>
             </View>
 
             <View
-              style={
-                styles.sectionHeaderText
-              }
-            >
+              style={[
+                styles.progressConnector,
+                allVerified &&
+                  styles.progressConnectorComplete,
+              ]}
+            />
+
+            <View
+              style={[
+                styles.progressStepCircle,
+                allVerified
+                  ? styles.progressStepComplete
+                  : styles.progressStepActive,
+              ]}>
               <Text
                 style={
-                  styles.cardTitle
-                }
-              >
+                  allVerified
+                    ? styles.progressStepCheck
+                    : styles.progressStepNumber
+                }>
+                {allVerified ? '✓' : '2'}
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.progressConnector,
+                allVerified &&
+                  styles.progressConnectorComplete,
+              ]}
+            />
+
+            <View
+              style={[
+                styles.progressStepCircle,
+                allVerified
+                  ? styles.progressStepActive
+                  : styles.progressStepPending,
+              ]}>
+              <Text
+                style={[
+                  styles.progressStepNumber,
+                ]}>
+                3
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.progressLabels}>
+            <Text style={styles.progressLabelActive}>
+              Arrived
+            </Text>
+            <Text style={styles.progressLabel}>
+              Verify
+            </Text>
+            <Text style={styles.progressLabel}>
+              Complete
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.heroCard}>
+          <View style={styles.heroIconCircle}>
+            <Text style={styles.heroIcon}>▣</Text>
+          </View>
+
+          <Text style={styles.heroTitle}>
+            Verify Delivery
+          </Text>
+
+          <Text style={styles.heroDescription}>
+            Confirm the package and customer before handing over the
+            order.
+          </Text>
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.deliverySummaryHeader}>
+            <Text style={styles.deliverySummaryTitle}>
+              Delivery {deliveryId}
+            </Text>
+
+            <View style={styles.assignedBadge}>
+              <Text style={styles.assignedBadgeText}>
+                At Customer
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.customerSummaryRow}>
+            <View style={styles.customerAvatar}>
+              <Text style={styles.customerAvatarText}>
+                {customerName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+
+            <View style={styles.customerSummaryInfo}>
+              <Text style={styles.customerSummaryName}>
+                {customerName}
+              </Text>
+              <Text style={styles.customerSummaryPhone}>
+                {customerPhone || 'Phone unavailable'}
+              </Text>
+            </View>
+
+            <Pressable
+              style={styles.callButton}
+              onPress={handleCallCustomer}
+              disabled={!customerPhone}>
+              <Text style={styles.callButtonIcon}>●</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.stepBadge}>
+              <Text style={styles.stepBadgeText}>1</Text>
+            </View>
+
+            <View style={styles.sectionHeaderText}>
+              <Text style={styles.sectionTitle}>
                 Package Verification
               </Text>
-
-              <Text
-                style={
-                  styles.cardSubtitle
-                }
-              >
-                Scan the parcel QR code or barcode before
-                handing the order to the customer.
+              <Text style={styles.sectionDescription}>
+                Optional: scan the warehouse label with order number {deliveryOrder?.orderNumber || '…'}. The app checks this label on device.
               </Text>
             </View>
           </View>
 
           <View
             style={[
-              styles.verificationBox,
+              styles.verificationMethodBox,
               packageVerified &&
-                styles.verificationBoxSuccess,
-            ]}
-          >
+                styles.verificationMethodBoxSuccess,
+            ]}>
             <View
               style={[
-                styles.qrIcon,
+                styles.methodIconCircle,
                 packageVerified &&
-                  styles.qrIconSuccess,
-              ]}
-            >
+                  styles.methodIconCircleSuccess,
+              ]}>
               <Text
                 style={[
-                  styles.qrIconText,
-                  packageVerified &&
-                    styles.qrIconTextSuccess,
-                ]}
-              >
-                {packageVerified
-                  ? '✓'
-                  : '▦'}
+                  styles.methodIcon,
+                  packageVerified && styles.methodIconSuccess,
+                ]}>
+                {packageVerified ? '✓' : '▦'}
               </Text>
             </View>
 
-            <Text
-              style={
-                styles.verificationTitle
-              }
-            >
-              {packageVerified
-                ? 'Package Code Detected'
-                : 'Package QR / Barcode'}
-            </Text>
-
-            <Text
-              style={
-                styles.verificationDescription
-              }
-            >
-              {packageVerified
-                ? 'The package code has been captured successfully. Continue with customer verification below.'
-                : 'Scan the package identifier to confirm that this parcel belongs to this delivery.'}
-            </Text>
-
-            {!packageVerified ? (
-              <Pressable
-                style={
-                  styles.primaryButton
-                }
-                onPress={
-                  handleOpenScanner
-                }
-              >
-                <Text
-                  style={
-                    styles.primaryButtonText
-                  }
-                >
-                  SCAN PACKAGE
-                </Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                style={
-                  styles.secondaryButton
-                }
-                onPress={
-                  handleRetryScan
-                }
-              >
-                <Text
-                  style={
-                    styles.secondaryButtonText
-                  }
-                >
-                  SCAN AGAIN
-                </Text>
-              </Pressable>
-            )}
-          </View>
-
-          {scannedCode !== null && (
-            <View
-              style={
-                styles.scannedCodeBox
-              }
-            >
-              <Text
-                style={
-                  styles.scannedCodeLabel
-                }
-              >
-                SCANNED CODE
+            <View style={styles.methodTextBlock}>
+              <Text style={styles.methodTitle}>
+                {packageVerified
+                  ? 'Package label matched'
+                  : 'Optional package label check'}
               </Text>
 
+              <Text style={styles.methodDescription}>
+                {packageVerified
+                  ? 'The scanned code matches this order number.'
+                  : 'If the package has an order-number barcode, you can scan it here. Customer OTP verification is required.'}
+              </Text>
+            </View>
+          </View>
+
+          {!packageVerified ? (
+            <Pressable
+              style={styles.primaryButton}
+              onPress={handleOpenScanner}>
+              <Text style={styles.primaryButtonText}>
+                SCAN PACKAGE
+              </Text>
+              <Text style={styles.primaryButtonArrow}>→</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={styles.secondaryActionButton}
+              onPress={handleRetryScan}>
+              <Text style={styles.secondaryActionText}>
+                SCAN AGAIN
+              </Text>
+            </Pressable>
+          )}
+
+          {scannedCode !== null && (
+            <View style={styles.scannedCodeBox}>
+              <Text style={styles.scannedCodeLabel}>
+                SCANNED CODE
+              </Text>
               <Text
-                style={
-                  styles.scannedCodeValue
-                }
-                numberOfLines={2}
-              >
+                style={styles.scannedCodeValue}
+                numberOfLines={2}>
                 {scannedCode}
               </Text>
             </View>
           )}
-
-          <View
-            style={
-              styles.infoRow
-            }
-          >
-            <Text
-              style={
-                styles.infoLabel
-              }
-            >
-              Order ID
-            </Text>
-
-            <Text
-              style={
-                styles.infoValue
-              }
-            >
-              {deliveryId}
-            </Text>
-          </View>
-
-          <View
-            style={
-              styles.infoRow
-            }
-          >
-            <Text
-              style={
-                styles.infoLabel
-              }
-            >
-              Package count
-            </Text>
-
-            <Text
-              style={
-                styles.infoValue
-              }
-            >
-              1 package
-            </Text>
-          </View>
-
-          <View
-            style={
-              styles.infoRowLast
-            }
-          >
-            <Text
-              style={
-                styles.infoLabel
-              }
-            >
-              Verification status
-            </Text>
-
-            <Text
-              style={[
-                styles.infoValue,
-                packageVerified &&
-                  styles.successValue,
-              ]}
-            >
-              {packageVerified
-                ? 'Package verified'
-                : 'Waiting for scan'}
-            </Text>
-          </View>
         </View>
 
-        {/* Customer Verification */}
-
-        {packageVerified && (
+        <>
           <View style={styles.card}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.stepBadge}>
+                <Text style={styles.stepBadgeText}>2</Text>
+              </View>
+
+              <View style={styles.sectionHeaderText}>
+                <Text style={styles.sectionTitle}>
+                  Customer OTP Check
+                </Text>
+                <Text style={styles.sectionDescription}>
+                  Enter the six-digit OTP provided by the customer. DailyMart will verify it for this delivery.
+                </Text>
+              </View>
+            </View>
+
             <View
-              style={
-                styles.sectionHeader
-              }
-            >
-              <View
-                style={
-                  styles.stepNumber
-                }
-              >
-                <Text
-                  style={
-                    styles.stepNumberText
-                  }
-                >
-                  2
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.sectionHeaderText
-                }
-              >
-                <Text
-                  style={
-                    styles.cardTitle
-                  }
-                >
-                  Customer Verification
-                </Text>
-
-                <Text
-                  style={
-                    styles.cardSubtitle
-                  }
-                >
-                  Ask the customer for the 6-digit OTP
-                  shown on their app.
-                </Text>
-              </View>
+              style={[
+                styles.otpContainer,
+                otpVerified && styles.otpContainerSuccess,
+              ]}>
+              <TextInput
+                value={otp}
+                onChangeText={handleOtpChange}
+                keyboardType="number-pad"
+                maxLength={6}
+                placeholder="Enter 6-digit OTP"
+                placeholderTextColor="#A2AAA4"
+                style={styles.otpInput}
+                textAlign="center"
+                editable={!otpVerified}
+              />
             </View>
 
-            <View>
-              <View
+            <Text style={styles.otpHint}>
+              The OTP is checked against this order by the DailyMart backend.
+            </Text>
+
+            {!otpVerified ? (
+              <Pressable
                 style={[
-                  styles.otpInputContainer,
-                  otpVerified &&
-                    styles.otpInputContainerSuccess,
+                  styles.primaryButton,
+                  otp.length !== 6 &&
+                    styles.primaryButtonDisabled,
+                  isOtpSubmitting && styles.primaryButtonDisabled,
                 ]}
-              >
-                <TextInput
-                  value={otp}
-                  onChangeText={
-                    handleOtpChange
-                  }
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  placeholder="Enter OTP"
-                  placeholderTextColor="#A3AAA3"
-                  style={
-                    styles.otpInput
-                  }
-                  textAlign="center"
-                  editable={
-                    !otpVerified
-                  }
-                />
-              </View>
-
-              <Text
-                style={
-                  styles.otpHint
-                }
-              >
-                Enter the 6-digit OTP provided by the
-                customer.
-              </Text>
-
-              {!otpVerified ? (
-                <Pressable
-                  style={[
-                    styles.primaryButton,
-                    otp.length !== 6 &&
-                      styles.primaryButtonDisabled,
-                  ]}
-                  onPress={
-                    handleVerifyOtp
-                  }
-                  disabled={
-                    otp.length !== 6
-                  }
-                >
-                  <Text
-                    style={
-                      styles.primaryButtonText
-                    }
-                  >
-                    VERIFY OTP
+                onPress={handleVerifyOtp}
+                disabled={otp.length !== 6 || isOtpSubmitting}>
+                <Text style={styles.primaryButtonText}>
+                  {isOtpSubmitting ? 'VERIFYING…' : 'VERIFY OTP'}
+                </Text>
+                <Text style={styles.primaryButtonArrow}>→</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.successBanner}>
+                <View style={styles.successIcon}>
+                  <Text style={styles.successIconText}>
+                    ✓
                   </Text>
-                </Pressable>
-              ) : (
-                <View
-                  style={
-                    styles.successBanner
-                  }
-                >
-                  <View
-                    style={
-                      styles.successIcon
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.successIconText
-                      }
-                    >
-                      ✓
-                    </Text>
-                  </View>
-
-                  <View
-                    style={
-                      styles.successContent
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.successTitle
-                      }
-                    >
-                      Customer OTP Verified
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.successText
-                      }
-                    >
-                      Customer verification has been
-                      completed successfully.
-                    </Text>
-                  </View>
                 </View>
-              )}
-            </View>
-          </View>
-        )}
 
-        {/* Final verification state */}
+                <View style={styles.successContent}>
+                  <Text style={styles.successTitle}>
+                    Customer OTP verified
+                  </Text>
+                  <Text style={styles.successText}>
+                    DailyMart verified this OTP for the assigned order.
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </>
 
         {allVerified && (
-          <View
-            style={
-              styles.finalCard
-            }
-          >
-            <View
-              style={
-                styles.finalIcon
-              }
-            >
-              <Text
-                style={
-                  styles.finalIconText
-              }
-              >
-                ✓
-              </Text>
+          <View style={styles.successCard}>
+            <View style={styles.successHeroCircle}>
+              <Text style={styles.successHeroCheck}>✓</Text>
             </View>
 
-            <Text
-              style={
-                styles.finalTitle
-              }
-            >
-              Delivery Verification Complete
+            <Text style={styles.successHeroTitle}>
+              Customer verification complete
             </Text>
 
-            <Text
-              style={
-                styles.finalDescription
-              }
-            >
-              The package and customer have both been
-              verified successfully.
+            <Text style={styles.successHeroDescription}>
+              {packageVerified
+                ? "The package label matched this order, and DailyMart verified the customer's OTP."
+                : "DailyMart verified the customer's OTP for this order."}
             </Text>
 
-            <Text
-              style={
-                styles.finalNote
-              }
-            >
-              You can now proceed to COD collection before
-              final delivery completion.
-            </Text>
+            <View style={styles.successDetailsCard}>
+              <View style={styles.successDetailRow}>
+                <Text style={styles.successDetailLabel}>
+                  Delivery
+                </Text>
+                <Text style={styles.successDetailValue}>
+                  {deliveryId}
+                </Text>
+              </View>
+
+              <View style={styles.successDetailRow}>
+                <Text style={styles.successDetailLabel}>
+                  Customer
+                </Text>
+                <Text style={styles.successDetailValue}>
+                  {customerName}
+                </Text>
+              </View>
+
+              <View style={styles.successDetailRow}>
+                <Text style={styles.successDetailLabel}>
+                  Customer OTP
+                </Text>
+                <Text style={styles.successDetailGreen}>
+                  Verified by DailyMart
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.successDetailRow,
+                  styles.successDetailRowLast,
+                ]}>
+                <Text style={styles.successDetailLabel}>Package label</Text>
+                <Text style={packageVerified ? styles.successDetailGreen : styles.successDetailMuted}>
+                  {packageVerified ? 'Matched in app' : 'Not scanned'}
+                </Text>
+              </View>
+
+            </View>
           </View>
         )}
-
-        {/* Continue to COD collection */}
 
         {allVerified && (
           <Pressable
-            style={
-              styles.primaryButton
-            }
-            onPress={
-              handleProceedToCODCollection
-            }
-          >
-            <Text
-              style={
-                styles.primaryButtonText
-              }
-            >
-              CONTINUE TO COD COLLECTION
+            style={styles.continueButton}
+            onPress={handleProceedToPayment}>
+            <Text style={styles.continueButtonText}>
+              CONTINUE TO PAYMENT
             </Text>
+            <Text style={styles.continueButtonArrow}>→</Text>
           </Pressable>
         )}
 
-        {/* Back action */}
-
         <Pressable
-          style={
-            styles.backButton
-          }
-          onPress={
-            handleBackToDelivery
-          }
-        >
-          <Text
-            style={
-              styles.backButtonText
-            }
-          >
+          style={styles.backToDeliveryButton}
+          onPress={handleBackToDelivery}>
+          <Text style={styles.backToDeliveryText}>
             BACK TO ACTIVE DELIVERY
           </Text>
         </Pressable>
@@ -1343,329 +929,664 @@ function DeliveryVerificationScreen({
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F7FAF7',
-  },
-
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 32,
-  },
-
+  safeArea: {flex: 1, backgroundColor: '#F7FAF8'},
+  content: {paddingHorizontal: 16, paddingTop: 7, paddingBottom: 32},
   header: {
+    minHeight: 54,
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-
-  headerTextContainer: {
-    flex: 1,
-    paddingRight: 12,
-  },
-
-  pageLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-
-  orderId: {
-    fontSize: 25,
-    fontWeight: '700',
-    color: '#111827',
-  },
-
-  headerBadge: {
-    borderRadius: 8,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    backgroundColor: '#E8F5E9',
-  },
-
-  headerBadgeText: {
-    fontSize: 8,
-    fontWeight: '700',
-    color: '#2E7D32',
-  },
-
-  progressCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 17,
-    padding: 18,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#E5EAE5',
-  },
-
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 10,
   },
+  headerBackButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerBackArrow: {fontSize: 35, lineHeight: 32, color: '#202729'},
+  headerTitleBlock: {flex: 1, alignItems: 'center'},
+  pageTitle: {fontSize: 18, fontWeight: '800', color: '#141A1C'},
+  headerOrderId: {marginTop: 2, fontSize: 9.5, color: '#7A8385'},
+  headerHelpBadge: {
+    minWidth: 52,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#E9F8ED',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerHelpText: {fontSize: 10, fontWeight: '800', color: '#078C46'},
 
-  progressTitle: {
-    fontSize: 14,
+  stepProgressCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#E5EBE7',
+    paddingHorizontal: 14,
+    paddingTop: 13,
+    paddingBottom: 11,
+    marginBottom: 10,
+  },
+  stepProgressLine: {flexDirection: 'row', alignItems: 'center'},
+  progressStepCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  progressStepComplete: {backgroundColor: '#0A9A49'},
+  progressStepActive: {backgroundColor: '#0A9A49'},
+  progressStepPending: {backgroundColor: '#DCE2DE'},
+  progressStepNumber: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#626C67',
+  },
+  progressStepCheck: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  progressConnector: {
+    flex: 1,
+    height: 2,
+    backgroundColor: '#DCE3DE',
+    marginHorizontal: 6,
+  },
+  progressConnectorComplete: {backgroundColor: '#9EDAB2'},
+  progressLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  progressLabelActive: {
+    width: 65,
+    textAlign: 'center',
+    fontSize: 9.5,
+    color: '#118E49',
     fontWeight: '700',
-    color: '#1F2937',
+  },
+  progressLabel: {
+    width: 65,
+    textAlign: 'center',
+    fontSize: 9.5,
+    color: '#626C67',
   },
 
-  progressCount: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2E7D32',
+  heroCard: {alignItems: 'center', paddingVertical: 10, marginBottom: 9},
+  heroIconCircle: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: '#E5F7EA',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  progressTrack: {
-    height: 7,
-    backgroundColor: '#E8ECE8',
-    borderRadius: 4,
-    marginTop: 13,
-    overflow: 'hidden',
+  heroIcon: {fontSize: 27, color: '#0A9749'},
+  heroTitle: {
+    marginTop: 9,
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#162022',
   },
-
-  progressFill: {
-    width: '0%',
-    height: '100%',
-    backgroundColor: '#2E7D32',
-    borderRadius: 4,
-  },
-
-  progressFillHalf: {
-    width: '50%',
-  },
-
-  progressFillComplete: {
-    width: '100%',
-  },
-
-  progressDescription: {
-    marginTop: 10,
-    fontSize: 11,
-    lineHeight: 17,
-    color: '#7A827A',
+  heroDescription: {
+    marginTop: 4,
+    maxWidth: 310,
+    fontSize: 10.5,
+    lineHeight: 16,
+    textAlign: 'center',
+    color: '#70797C',
   },
 
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 17,
-    padding: 18,
-    marginBottom: 15,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5EAE5',
+    borderColor: '#E5EBE7',
+    padding: 13,
+    marginBottom: 10,
   },
+  deliverySummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  deliverySummaryTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#202729',
+  },
+  assignedBadge: {
+    minHeight: 25,
+    paddingHorizontal: 8,
+    borderRadius: 7,
+    backgroundColor: '#DDF7E4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assignedBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#078E46',
+  },
+  customerSummaryRow: {flexDirection: 'row', alignItems: 'center'},
+  customerAvatar: {
+    width: 45,
+    height: 45,
+    borderRadius: 23,
+    backgroundColor: '#F0E4D4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 9,
+  },
+  customerAvatarText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#604A38',
+  },
+  customerSummaryInfo: {flex: 1},
+  customerSummaryName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#202729',
+  },
+  customerSummaryPhone: {
+    marginTop: 2,
+    fontSize: 10.5,
+    color: '#7B8386',
+  },
+  callButton: {
+    width: 39,
+    height: 39,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#0A9649',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callButtonIcon: {fontSize: 13, color: '#0A9649'},
 
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 18,
-  },
-
-  stepNumber: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 11,
-  },
-
-  stepNumberText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-
-  sectionHeaderText: {
-    flex: 1,
-  },
-
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-
-  cardSubtitle: {
-    marginTop: 5,
-    fontSize: 11,
-    lineHeight: 17,
-    color: '#7A827A',
-  },
-
-  verificationBox: {
-    alignItems: 'center',
-    backgroundColor: '#F7FAF7',
-    borderRadius: 14,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#E5EAE5',
-    borderStyle: 'dashed',
-    marginBottom: 16,
-  },
-
-  verificationBoxSuccess: {
-    backgroundColor: '#EEF8EF',
-    borderColor: '#C8E6C9',
-    borderStyle: 'solid',
-  },
-
-  qrIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: 16,
-    backgroundColor: '#E8F5E9',
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: 12,
   },
-
-  qrIconSuccess: {
-    backgroundColor: '#2E7D32',
+  stepBadge: {
+    width: 29,
+    height: 29,
+    borderRadius: 15,
+    backgroundColor: '#0A9A49',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  stepBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  sectionHeaderText: {flex: 1},
+  sectionTitle: {fontSize: 14, fontWeight: '800', color: '#202729'},
+  sectionDescription: {
+    marginTop: 3,
+    fontSize: 9.5,
+    lineHeight: 15,
+    color: '#747D7F',
   },
 
-  qrIconText: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#2E7D32',
+  verificationMethodBox: {
+    minHeight: 72,
+    borderRadius: 12,
+    backgroundColor: '#F7FAF8',
+    borderWidth: 1,
+    borderColor: '#E2E9E4',
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-
-  qrIconTextSuccess: {
+  verificationMethodBoxSuccess: {
+    backgroundColor: '#EAF8ED',
+    borderColor: '#C6E7CE',
+  },
+  methodIconCircle: {
+    width: 43,
+    height: 43,
+    borderRadius: 22,
+    backgroundColor: '#E4F6EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 9,
+  },
+  methodIconCircleSuccess: {backgroundColor: '#0B9B4A'},
+  methodIcon: {fontSize: 23, color: '#078E46'},
+  methodIconSuccess: {color: '#FFFFFF'},
+  methodTextBlock: {flex: 1},
+  methodTitle: {fontSize: 11.5, fontWeight: '800', color: '#202729'},
+  methodDescription: {
+    marginTop: 3,
+    fontSize: 9,
+    lineHeight: 14,
+    color: '#737D7F',
+  },
+  primaryButton: {
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: '#079A49',
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonDisabled: {backgroundColor: '#BBC2BD'},
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  primaryButtonArrow: {
+    marginLeft: 8,
+    fontSize: 19,
     color: '#FFFFFF',
   },
-
-  verificationTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#1F2937',
-    textAlign: 'center',
+  secondaryActionButton: {
+    minHeight: 45,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#0A9649',
+    marginTop: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  verificationDescription: {
-    marginTop: 6,
+  secondaryActionText: {
     fontSize: 11,
-    lineHeight: 17,
-    color: '#7A827A',
-    textAlign: 'center',
+    fontWeight: '800',
+    color: '#078E46',
+  },
+  scannedCodeBox: {
+    marginTop: 9,
+    padding: 9,
+    borderRadius: 9,
+    backgroundColor: '#F0F8F1',
+    borderWidth: 1,
+    borderColor: '#C9E7CE',
+  },
+  scannedCodeLabel: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#6E7972',
+    marginBottom: 3,
+  },
+  scannedCodeValue: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#293233',
   },
 
-  cameraScreen: {
+  otpContainer: {
+    height: 58,
+    borderWidth: 1,
+    borderColor: '#CBD4CE',
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+  },
+  otpContainerSuccess: {
+    borderColor: '#79C98A',
+    backgroundColor: '#F0FAF2',
+  },
+  otpInput: {
     flex: 1,
-    backgroundColor: '#000000',
+    paddingHorizontal: 12,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 5,
+    color: '#1F2937',
+  },
+  otpHint: {
+    marginTop: 7,
+    fontSize: 9,
+    lineHeight: 14,
+    color: '#858E8A',
+  },
+  successBanner: {
+    marginTop: 10,
+    minHeight: 55,
+    borderRadius: 10,
+    backgroundColor: '#E7F7EB',
+    borderWidth: 1,
+    borderColor: '#C5E5CC',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 9,
+  },
+  successIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#0A9A49',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  successIconText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  successContent: {flex: 1},
+  successTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#1F5130',
+  },
+  successText: {
+    marginTop: 2,
+    fontSize: 9,
+    lineHeight: 14,
+    color: '#617165',
   },
 
-  cameraHeader: {
-    height: 72,
-    paddingHorizontal: 18,
-    backgroundColor: '#000000',
+  photoPlaceholder: {
+    backgroundColor: '#F7FAF8',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E3E9E5',
+    padding: 13,
+    alignItems: 'center',
+  },
+  photoPlaceholderIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#E5F6EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoPlaceholderIconText: {fontSize: 25, color: '#0A9749'},
+  photoPlaceholderTitle: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#202729',
+  },
+  photoPlaceholderDescription: {
+    marginTop: 4,
+    maxWidth: 285,
+    fontSize: 9.5,
+    lineHeight: 15,
+    textAlign: 'center',
+    color: '#75807A',
+  },
+  photoCapturedCard: {
+    borderRadius: 12,
+    backgroundColor: '#EAF8ED',
+    borderWidth: 1,
+    borderColor: '#C6E7CE',
+    overflow: 'hidden',
+  },
+  photoPreview: {
+    height: 135,
+    backgroundColor: '#D9E7D7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoPreviewBag: {fontSize: 47},
+  photoPreviewText: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#158342',
+  },
+  photoPreviewLocation: {
+    marginTop: 2,
+    fontSize: 9,
+    color: '#647367',
+  },
+  photoCapturedInfo: {
+    minHeight: 57,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-
-  cameraHeaderLabel: {
+  photoCapturedTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#285132',
+  },
+  photoCapturedSubtitle: {
+    marginTop: 2,
     fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    color: '#A7ADA7',
+    color: '#69766E',
+  },
+  retakeButton: {
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#7BC88D',
+    paddingHorizontal: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retakeButtonText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#078D46',
   },
 
+  successCard: {
+    alignItems: 'center',
+    backgroundColor: '#EAF8ED',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#C6E7CE',
+    padding: 16,
+    marginBottom: 10,
+  },
+  successHeroCircle: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    backgroundColor: '#0AA14D',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successHeroCheck: {
+    fontSize: 39,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  successHeroTitle: {
+    marginTop: 11,
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#172120',
+  },
+  successHeroDescription: {
+    marginTop: 4,
+    maxWidth: 290,
+    fontSize: 10.5,
+    lineHeight: 16,
+    textAlign: 'center',
+    color: '#65716A',
+  },
+  successDetailsCard: {
+    width: '100%',
+    marginTop: 13,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E8E2',
+    paddingHorizontal: 10,
+  },
+  successDetailRow: {
+    minHeight: 38,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDF1EE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  successDetailRowLast: {borderBottomWidth: 0},
+  successDetailLabel: {fontSize: 9.5, color: '#7A8580'},
+  successDetailValue: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#394144',
+  },
+  successDetailGreen: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#078D46',
+  },
+  successDetailMuted: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: '#8A918D',
+  },
+  continueButton: {
+    height: 51,
+    borderRadius: 11,
+    backgroundColor: '#079A49',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 9,
+  },
+  continueButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  continueButtonArrow: {
+    marginLeft: 9,
+    fontSize: 21,
+    color: '#FFFFFF',
+  },
+  backToDeliveryButton: {
+    height: 47,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#C9D2CB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backToDeliveryText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#626D67',
+  },
+
+  cameraScreen: {flex: 1, backgroundColor: '#000000'},
+  cameraHeader: {
+    height: 72,
+    paddingHorizontal: 18,
+    backgroundColor: '#101313',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cameraHeaderLabel: {
+    fontSize: 8.5,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+    color: '#9EA6A3',
+  },
   cameraHeaderOrder: {
     marginTop: 3,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#FFFFFF',
   },
-
   cameraCloseButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#252825',
+    backgroundColor: '#252A2A',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   cameraCloseButtonText: {
     color: '#FFFFFF',
     fontSize: 25,
     lineHeight: 27,
-    fontWeight: '400',
   },
-
   cameraPreviewArea: {
     flex: 1,
     position: 'relative',
     backgroundColor: '#000000',
   },
-
   fullScreenCamera: {
     flex: 1,
     width: '100%',
     height: '100%',
   },
-
   cameraOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   scanFrame: {
     width: 260,
     height: 260,
     position: 'relative',
   },
-
   corner: {
     position: 'absolute',
     width: 38,
     height: 38,
-    borderColor: '#FFFFFF',
+    borderColor: '#72E9A0',
   },
-
   cornerTopLeft: {
     top: 0,
     left: 0,
-    borderTopWidth: 3,
-    borderLeftWidth: 3,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderTopLeftRadius: 5,
   },
-
   cornerTopRight: {
     top: 0,
     right: 0,
-    borderTopWidth: 3,
-    borderRightWidth: 3,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderTopRightRadius: 5,
   },
-
   cornerBottomLeft: {
     bottom: 0,
     left: 0,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderBottomLeftRadius: 5,
   },
-
   cornerBottomRight: {
     bottom: 0,
     right: 0,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderBottomRightRadius: 5,
   },
-
   scannerInstruction: {
-    marginTop: 25,
-    paddingHorizontal: 16,
+    marginTop: 24,
+    maxWidth: 290,
+    paddingHorizontal: 15,
     paddingVertical: 9,
     borderRadius: 9,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.58)',
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 10.5,
+    lineHeight: 15,
     textAlign: 'center',
   },
-
   cameraBottomButton: {
     position: 'absolute',
     left: 18,
@@ -1673,295 +1594,74 @@ const styles = StyleSheet.create({
     bottom: 20,
     height: 50,
     borderRadius: 11,
-    backgroundColor: 'rgba(255,255,255,0.94)',
+    backgroundColor: 'rgba(255,255,255,0.95)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   cameraBottomButtonText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '800',
     color: '#2E7D32',
   },
-
   cameraMessage: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 30,
-    backgroundColor: '#101210',
+    backgroundColor: '#111515',
   },
-
-  cameraMessageIcon: {
-    fontSize: 40,
-    marginBottom: 12,
-  },
-
+  cameraMessageIcon: {fontSize: 39, marginBottom: 11},
   cameraMessageTitle: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#FFFFFF',
     textAlign: 'center',
   },
-
   cameraMessageDescription: {
     marginTop: 8,
-    fontSize: 12,
-    lineHeight: 18,
-    color: '#C5CBC5',
+    maxWidth: 310,
+    fontSize: 11,
+    lineHeight: 17,
+    color: '#C6CDCA',
     textAlign: 'center',
   },
-
-  primaryButton: {
-    width: '100%',
-    height: 50,
-    borderRadius: 11,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 17,
-  },
-
-  primaryButtonDisabled: {
-    backgroundColor: '#B7C0B7',
-  },
-
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-  },
-
-  secondaryButton: {
-    width: '100%',
-    height: 50,
-    borderRadius: 11,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#C9D0C9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 11,
-  },
-
-  secondaryButtonText: {
-    color: '#5F675F',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-
   permissionSettingsText: {
     marginTop: 14,
+    maxWidth: 310,
     fontSize: 10,
     lineHeight: 16,
-    color: '#F0C36E',
+    color: '#F2C46F',
     textAlign: 'center',
   },
-
   errorIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#5A2020',
+    backgroundColor: '#5D2424',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
   },
-
   errorIconText: {
-    color: '#FF8A80',
+    color: '#FF958A',
     fontSize: 26,
-    fontWeight: '800',
+    fontWeight: '900',
   },
-
-  scannedCodeBox: {
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: '#F1F7F1',
-    borderWidth: 1,
-    borderColor: '#C8E6C9',
-    marginBottom: 16,
-  },
-
-  scannedCodeLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#6C756C',
-    marginBottom: 4,
-  },
-
-  scannedCodeValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 11,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F2F0',
-  },
-
-  infoRowLast: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 11,
-  },
-
-  infoLabel: {
-    fontSize: 12,
-    color: '#7A827A',
-  },
-
-  infoValue: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#374151',
-  },
-
-  successValue: {
-    color: '#2E7D32',
-  },
-
-  otpInputContainer: {
-    height: 58,
-    borderWidth: 1,
-    borderColor: '#C9D0C9',
+  secondaryButton: {
+    width: '100%',
+    height: 49,
     borderRadius: 11,
     backgroundColor: '#FFFFFF',
-  },
-
-  otpInputContainerSuccess: {
-    borderColor: '#81C784',
-    backgroundColor: '#F2FBF3',
-  },
-
-  otpInput: {
-    flex: 1,
-    paddingHorizontal: 15,
-    fontSize: 24,
-    fontWeight: '700',
-    letterSpacing: 8,
-    color: '#1F2937',
-  },
-
-  otpHint: {
-    marginTop: 9,
-    fontSize: 10,
-    lineHeight: 16,
-    color: '#8A918A',
-  },
-
-  successBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 17,
     borderWidth: 1,
-    borderColor: '#C8E6C9',
-  },
-
-  successIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#2E7D32',
+    borderColor: '#C8D0C9',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 11,
-  },
-
-  successIconText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-
-  successContent: {
-    flex: 1,
-  },
-
-  successTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-
-  successText: {
-    marginTop: 3,
-    fontSize: 10,
-    lineHeight: 16,
-    color: '#667066',
-  },
-
-  finalCard: {
-    alignItems: 'center',
-    backgroundColor: '#EEF8EF',
-    borderRadius: 17,
-    padding: 22,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#B8DDBA',
-  },
-
-  finalIcon: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-
-  finalIconText: {
-    color: '#FFFFFF',
-    fontSize: 28,
-    fontWeight: '800',
-  },
-
-  finalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-    textAlign: 'center',
-  },
-
-  finalDescription: {
-    marginTop: 6,
-    fontSize: 11,
-    lineHeight: 17,
-    color: '#667066',
-    textAlign: 'center',
-  },
-
-  finalNote: {
     marginTop: 10,
-    fontSize: 10,
-    lineHeight: 16,
-    color: '#7A827A',
-    textAlign: 'center',
   },
-
-  backButton: {
-    height: 50,
-    borderRadius: 11,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#C9D0C9',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  backButtonText: {
-    fontSize: 13,
+  secondaryButtonText: {
+    color: '#5F6863',
+    fontSize: 12,
     fontWeight: '800',
-    color: '#5F675F',
   },
 });
 

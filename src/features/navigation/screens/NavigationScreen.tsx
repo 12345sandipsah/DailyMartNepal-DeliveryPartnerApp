@@ -5,146 +5,144 @@ import React, {
   useRef,
   useState,
 } from 'react';
+
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
+import {
+  faArrowLeft,
+  faArrowRight,
+  faArrowUp,
+  faArrowDown,
+  faBullseye,
+  faCommentDots,
+  faLocationArrow,
+  faLocationCrosshairs,
+  faPhone,
+  faRoute,
+  faVolumeHigh,
+  faVolumeXmark,
+} from '@fortawesome/free-solid-svg-icons';
+
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+
 import Mapbox, {
   requestAndroidLocationPermissions,
   type Location,
 } from '@rnmapbox/maps';
 
-import { MAPBOX_ACCESS_TOKEN } from '../../../config/mapboxConfig';
+import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
 
-type NavigationStackParamList = {
-  Navigation: {
-    deliveryId: string;
-  };
-};
+import { MAPBOX_ACCESS_TOKEN } from '../../../config/mapboxConfig';
+import { getDelivery, updatePartnerLocation } from '../../../shared/services/api';
 
 type NavigationScreenProps = NativeStackScreenProps<
-  NavigationStackParamList,
+  MainStackParamList,
   'Navigation'
 >;
 
 type DeliveryStop = {
   id: string;
+
   orderId: string;
+
   customerName: string;
+
+  customerPhone: string;
+
   address: string;
+
   coordinate: [number, number];
+
   paymentMethod: 'COD' | 'ONLINE';
+
   amount: number;
 };
 
 type RouteShape = {
   type: 'Feature';
+
   properties: Record<string, never>;
+
   geometry: {
     type: 'LineString';
+
     coordinates: [number, number][];
   };
 };
 
 type DirectionsRoute = {
   distance: number;
+
   duration: number;
+
   geometry: {
     type: 'LineString';
+
     coordinates: number[][];
   };
 };
 
 type DirectionsResponse = {
   code: string;
+
   message?: string;
+
   routes?: DirectionsRoute[];
 };
 
-const INITIAL_DELIVERY_STOPS: DeliveryStop[] = [
-  {
-    id: 'stop-1',
-    orderId: 'DM12345',
-    customerName: 'Customer A',
-    address: 'Birgunj, Parsa',
-    coordinate: [84.8785, 27.0125],
-    paymentMethod: 'COD',
-    amount: 850,
-  },
-  {
-    id: 'stop-2',
-    orderId: 'DM12346',
-    customerName: 'Customer B',
-    address: 'Adarshnagar, Birgunj',
-    coordinate: [84.8718, 27.0008],
-    paymentMethod: 'ONLINE',
-    amount: 0,
-  },
-  {
-    id: 'stop-3',
-    orderId: 'DM12347',
-    customerName: 'Customer C',
-    address: 'Maisthan, Birgunj',
-    coordinate: [84.8862, 27.0078],
-    paymentMethod: 'COD',
-    amount: 1_200,
-  },
-  {
-    id: 'stop-4',
-    orderId: 'DM12348',
-    customerName: 'Customer D',
-    address: 'Ghantaghar, Birgunj',
-    coordinate: [84.8755, 27.0148],
-    paymentMethod: 'ONLINE',
-    amount: 0,
-  },
-];
 
-// Temporary only.
-// The real partner location comes from Mapbox GPS after tracking starts.
-const INITIAL_PARTNER_COORDINATE: [number, number] = [
-  84.8665,
-  27.0055,
-];
+
+/**
+  * Temporary starting coordinate only.
+  * The actual route starts from real phone GPS
+  * once tracking is enabled.
+
+  */
+
+const INITIAL_PARTNER_COORDINATE: [number, number] = [84.8665, 27.0055];
 
 const MAX_ROUTE_COORDINATES = 25;
+
 const ROUTE_REROUTE_DISTANCE_KM = 0.1;
+
 const ROUTE_REQUEST_INTERVAL_MS = 30_000;
 
 const DELIVERY_ROUTE_LINE_STYLE = {
-  lineColor: '#2E7D32',
-  lineWidth: 5,
+  lineColor: '#167DE4',
+
+  lineWidth: 6,
+
   lineCap: 'round' as const,
+
   lineJoin: 'round' as const,
 };
 
 function calculateDistanceKm(
   start: [number, number],
+
   end: [number, number],
 ) {
-  const toRadians = (value: number) =>
-    (value * Math.PI) / 180;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
 
   const earthRadiusKm = 6371;
 
-  const latitudeDifference = toRadians(
-    end[1] - start[1],
-  );
+  const latitudeDifference = toRadians(end[1] - start[1]);
 
-  const longitudeDifference = toRadians(
-    end[0] - start[0],
-  );
+  const longitudeDifference = toRadians(end[0] - start[0]);
 
   const a =
-    Math.sin(latitudeDifference / 2) *
-      Math.sin(latitudeDifference / 2) +
+    Math.sin(latitudeDifference / 2) * Math.sin(latitudeDifference / 2) +
     Math.cos(toRadians(start[1])) *
       Math.cos(toRadians(end[1])) *
       Math.sin(longitudeDifference / 2) *
@@ -154,149 +152,219 @@ function calculateDistanceKm(
     2 *
     Math.atan2(
       Math.sqrt(a),
+
       Math.sqrt(1 - a),
     );
 
   return earthRadiusKm * c;
 }
 
-function NavigationScreen({
-  route,
-}: NavigationScreenProps) {
+function NavigationScreen({ route, navigation }: NavigationScreenProps) {
   const { deliveryId } = route.params;
 
-  const cameraRef =
-    useRef<React.ComponentRef<typeof Mapbox.Camera>>(null);
+  const cameraRef = useRef<React.ComponentRef<typeof Mapbox.Camera> | null>(
+    null,
+  );
 
-  const routeAbortControllerRef =
-    useRef<AbortController | null>(null);
+  const routeAbortControllerRef = useRef<AbortController | null>(null);
 
-  // Origin used by the most recent route request.
-  const lastRequestedRouteOriginRef =
-    useRef<[number, number] | null>(null);
+  /**
+  * Origin used by the most recent route request.
 
-  // Stop order used by the most recent route request.
-  const lastRequestedStopOrderRef =
-    useRef('');
+    */
 
-  // Origin from the most recent successful route.
-  const lastSuccessfulRouteOriginRef =
-    useRef<[number, number] | null>(null);
+  const lastRequestedRouteOriginRef = useRef<[number, number] | null>(null);
 
-  const lastRouteRequestTimeRef =
-    useRef(0);
+  /**
+  * Delivery-stop order used by the most recent
+  * route request.
 
-  const [isTracking, setIsTracking] =
-    useState(false);
+    */
 
-  const [hasLiveLocation, setHasLiveLocation] =
-    useState(false);
+  const lastRequestedStopOrderRef = useRef('');
 
-  const [partnerCoordinate, setPartnerCoordinate] =
-    useState<[number, number]>(
-      INITIAL_PARTNER_COORDINATE,
-    );
+  /**
+  * Origin from the most recent successful route.
 
-  const [locationAccuracy, setLocationAccuracy] =
-    useState<number | null>(null);
+    */
 
-  const [deliveryStops, setDeliveryStops] =
-    useState<DeliveryStop[]>(
-      INITIAL_DELIVERY_STOPS,
-    );
+  const lastSuccessfulRouteOriginRef = useRef<[number, number] | null>(null);
 
-  // No fallback route line.
-  // A route appears only after Mapbox returns a real road route.
-  const [routeShape, setRouteShape] =
-    useState<RouteShape | null>(null);
+  const lastRouteRequestTimeRef = useRef(0);
 
-  // These values represent ONLY the Mapbox road route.
-  const [routeDistanceKm, setRouteDistanceKm] =
-    useState<number | null>(null);
+  const lastPartnerLocationPostRef = useRef(0);
 
-  const [routeDurationMinutes, setRouteDurationMinutes] =
-    useState<number | null>(null);
+  const [isTracking, setIsTracking] = useState(false);
 
-  const [isRouteLoading, setIsRouteLoading] =
-    useState(false);
+  const [hasLiveLocation, setHasLiveLocation] = useState(false);
 
-  const [routeError, setRouteError] =
-    useState<string | null>(null);
+  const [partnerCoordinate, setPartnerCoordinate] = useState<[number, number]>(
+    INITIAL_PARTNER_COORDINATE,
+  );
+
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+
+  const [deliveryStops, setDeliveryStops] = useState<DeliveryStop[]>([]);
+
+  /**
+  * IMPORTANT:
+  * No fallback route line.
+  * A route appears only after Mapbox returns
+  * a real road route.
+
+    */
+
+  const [routeShape, setRouteShape] = useState<RouteShape | null>(null);
+
+  /**
+  * These values are ONLY Mapbox road-route values.
+
+    */
+
+  const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
+
+  const [routeDurationMinutes, setRouteDurationMinutes] = useState<
+    number | null
+  >(null);
+
+  const [isRouteLoading, setIsRouteLoading] = useState(false);
+
+  const [routeError, setRouteError] = useState<string | null>(null);
+
+  const [isMuted, setIsMuted] = useState(false);
+
+  const [showRouteOverview, setShowRouteOverview] = useState(false);
 
   const routeCoordinates = useMemo(() => {
-    return [
-      partnerCoordinate,
-      ...deliveryStops.map(stop => stop.coordinate),
-    ];
+    return [partnerCoordinate, ...deliveryStops.map(stop => stop.coordinate)];
   }, [partnerCoordinate, deliveryStops]);
 
   const stopOrderKey = useMemo(() => {
     return deliveryStops
+
       .map(stop => stop.id)
+
       .join('|');
   }, [deliveryStops]);
+
+  const currentStop = deliveryStops[0] ?? null;
+
+  useEffect(() => {
+    let active = true;
+    setDeliveryStops([]);
+    getDelivery(deliveryId.replace(/^#/, ''))
+      .then(order => {
+        const location = order.deliveryLocation;
+        const latitude = Number(location?.latitude);
+        const longitude = Number(location?.longitude);
+        if (!active) return;
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          setRouteError('This order does not have valid delivery coordinates. Contact warehouse support.');
+          return;
+        }
+        setDeliveryStops([{
+          id: order._id,
+          orderId: order.orderNumber,
+          customerName: location?.name || order.customer?.fullName || 'Customer',
+          customerPhone: location?.phone || order.customer?.mobileNumber || '',
+          address: [location?.locality, location?.formattedAddress, location?.cityName].filter(Boolean).join(', '),
+          coordinate: [longitude, latitude],
+          paymentMethod: order.paymentMethod === 'cod' ? 'COD' : 'ONLINE',
+          amount: order.paymentMethod === 'cod' ? Number(order.total || 0) : 0,
+        }]);
+      })
+      .catch(error => {
+        if (active) setRouteError(error instanceof Error ? error.message : 'Unable to load this delivery.');
+      });
+    return () => { active = false; };
+  }, [deliveryId]);
 
   const fitMapToAllStops = useCallback(() => {
     if (routeCoordinates.length < 2) {
       return;
     }
 
-    const longitudes = routeCoordinates.map(
-      coordinate => coordinate[0],
-    );
+    const longitudes = routeCoordinates.map(coordinate => coordinate[0]);
 
-    const latitudes = routeCoordinates.map(
-      coordinate => coordinate[1],
-    );
+    const latitudes = routeCoordinates.map(coordinate => coordinate[1]);
 
-    const minLongitude = Math.min(
-      ...longitudes,
-    );
+    const minLongitude = Math.min(...longitudes);
 
-    const maxLongitude = Math.max(
-      ...longitudes,
-    );
+    const maxLongitude = Math.max(...longitudes);
 
-    const minLatitude = Math.min(
-      ...latitudes,
-    );
+    const minLatitude = Math.min(...latitudes);
 
-    const maxLatitude = Math.max(
-      ...latitudes,
-    );
+    const maxLatitude = Math.max(...latitudes);
 
     cameraRef.current?.fitBounds(
       [maxLongitude, maxLatitude],
+
       [minLongitude, minLatitude],
-      [50, 50, 50, 50],
+
+      [70, 60, 300, 60],
+
       800,
     );
   }, [routeCoordinates]);
 
+  const fitToCurrentStop = useCallback(() => {
+    if (!currentStop) {
+      return;
+    }
+
+    cameraRef.current?.fitBounds(
+      [
+        Math.max(
+          partnerCoordinate[0],
+
+          currentStop.coordinate[0],
+        ),
+
+        Math.max(
+          partnerCoordinate[1],
+
+          currentStop.coordinate[1],
+        ),
+      ],
+
+      [
+        Math.min(
+          partnerCoordinate[0],
+
+          currentStop.coordinate[0],
+        ),
+
+        Math.min(
+          partnerCoordinate[1],
+
+          currentStop.coordinate[1],
+        ),
+      ],
+
+      [80, 50, 290, 50],
+
+      800,
+    );
+  }, [partnerCoordinate, currentStop]);
+
   const moveStop = (
     currentIndex: number,
+
     direction: 'up' | 'down',
   ) => {
     const targetIndex =
-      direction === 'up'
-        ? currentIndex - 1
-        : currentIndex + 1;
+      direction === 'up' ? currentIndex - 1 : currentIndex + 1;
 
-    if (
-      targetIndex < 0 ||
-      targetIndex >= deliveryStops.length
-    ) {
+    if (targetIndex < 0 || targetIndex >= deliveryStops.length) {
       return;
     }
 
     setDeliveryStops(currentStops => {
       const updatedStops = [...currentStops];
 
-      const currentStop =
-        updatedStops[currentIndex];
+      const currentStop = updatedStops[currentIndex];
 
-      updatedStops[currentIndex] =
-        updatedStops[targetIndex];
+      updatedStops[currentIndex] = updatedStops[targetIndex];
 
       updatedStops[targetIndex] = currentStop;
 
@@ -304,15 +372,20 @@ function NavigationScreen({
     });
   };
 
+  /**
+  * MAPBOX DIRECTIONS API
+
+    */
+
   const fetchRoadRoute = useCallback(
     async (
       coordinates: [number, number][],
+
       currentStopOrderKey: string,
     ) => {
       if (
         coordinates.length < 2 ||
-        coordinates.length >
-          MAX_ROUTE_COORDINATES
+        coordinates.length > MAX_ROUTE_COORDINATES
       ) {
         setRouteError(
           `A maximum of ${
@@ -324,146 +397,121 @@ function NavigationScreen({
       }
 
       const coordinateString = coordinates
-        .map(
-          ([longitude, latitude]) =>
-            `${longitude},${latitude}`,
-        )
+
+        .map(([longitude, latitude]) => `${longitude},${latitude}`)
+
         .join(';');
 
       const requestUrl =
-        `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
+        `https\://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
         `${coordinateString}` +
         `?alternatives=false` +
         `&overview=full` +
         `&geometries=geojson` +
         `&steps=false` +
-        `&access_token=${encodeURIComponent(
-          MAPBOX_ACCESS_TOKEN,
-        )}`;
+        `&access_token=${encodeURIComponent(MAPBOX_ACCESS_TOKEN)}`;
 
       routeAbortControllerRef.current?.abort();
 
-      const controller =
-        new AbortController();
+      const controller = new AbortController();
 
-      routeAbortControllerRef.current =
-        controller;
+      routeAbortControllerRef.current = controller;
 
-      // Record every request origin/order.
-      lastRequestedRouteOriginRef.current =
-        coordinates[0];
+      lastRequestedRouteOriginRef.current = coordinates[0];
 
-      lastRequestedStopOrderRef.current =
-        currentStopOrderKey;
+      lastRequestedStopOrderRef.current = currentStopOrderKey;
 
-      lastRouteRequestTimeRef.current =
-        Date.now();
+      lastRouteRequestTimeRef.current = Date.now();
 
       setIsRouteLoading(true);
+
       setRouteError(null);
 
       try {
         const response = await fetch(
           requestUrl,
+
           {
             method: 'GET',
+
             signal: controller.signal,
           },
         );
 
-        const data =
-          (await response.json()) as DirectionsResponse;
+        const data = (await response.json()) as DirectionsResponse;
 
         if (!response.ok) {
           throw new Error(
-            data.message ||
-              `Route request failed (${response.status}).`,
+            data.message || `Route request failed (${response.status}).`,
           );
         }
 
-        if (
-          data.code !== 'Ok' ||
-          !data.routes ||
-          data.routes.length === 0
-        ) {
+        if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
           throw new Error(
             data.message ||
               'Mapbox could not find a road route for these locations.',
           );
         }
 
-        const routeResult =
-          data.routes[0];
+        const routeResult = data.routes[0];
 
-        const routeCoordinatesFromApi =
-          routeResult.geometry.coordinates
-            .filter(
-              coordinate =>
-                coordinate.length >= 2 &&
-                Number.isFinite(
-                  coordinate[0],
-                ) &&
-                Number.isFinite(
-                  coordinate[1],
-                ),
-            )
-            .map(
-              coordinate =>
-                [
-                  coordinate[0],
-                  coordinate[1],
-                ] as [number, number],
-            );
+        const routeCoordinatesFromApi = routeResult.geometry.coordinates
 
-        if (
-          routeCoordinatesFromApi.length < 2
-        ) {
-          throw new Error(
-            'Mapbox returned an invalid road route geometry.',
+          .filter(
+            coordinate =>
+              coordinate.length >= 2 &&
+              Number.isFinite(coordinate[0]) &&
+              Number.isFinite(coordinate[1]),
+          )
+
+          .map(
+            coordinate => [coordinate[0], coordinate[1]] as [number, number],
           );
+
+        if (routeCoordinatesFromApi.length < 2) {
+          throw new Error('Mapbox returned an invalid road route geometry.');
         }
 
-        // This is the actual road geometry returned by Mapbox.
         setRouteShape({
           type: 'Feature',
+
           properties: {},
+
           geometry: {
             type: 'LineString',
-            coordinates:
-              routeCoordinatesFromApi,
+
+            coordinates: routeCoordinatesFromApi,
           },
         });
 
-        // Mapbox returns route distance in meters.
-        setRouteDistanceKm(
-          routeResult.distance / 1000,
-        );
+        setRouteDistanceKm(routeResult.distance / 1000);
 
-        // Mapbox returns duration in seconds.
         setRouteDurationMinutes(
           Math.max(
             1,
-            Math.round(
-              routeResult.duration / 60,
-            ),
+
+            Math.round(routeResult.duration / 60),
           ),
         );
 
-        lastSuccessfulRouteOriginRef.current =
-          coordinates[0];
+        lastSuccessfulRouteOriginRef.current = coordinates[0];
 
         setRouteError(null);
       } catch (error) {
-        if (
-          error instanceof Error &&
-          error.name === 'AbortError'
-        ) {
+        if (error instanceof Error && error.name === 'AbortError') {
           return;
         }
 
-        // Never display straight-line distance as road distance.
+        /**
+  * Never replace a failed road route
+  * with straight-line distance.
+
+          */
+
         setRouteShape(null);
+
         setRouteDistanceKm(null);
+
         setRouteDurationMinutes(null);
 
         setRouteError(
@@ -472,54 +520,50 @@ function NavigationScreen({
             : 'Unable to calculate the road route.',
         );
       } finally {
-        if (
-          routeAbortControllerRef.current ===
-          controller
-        ) {
-          routeAbortControllerRef.current =
-            null;
+        if (routeAbortControllerRef.current === controller) {
+          routeAbortControllerRef.current = null;
 
           setIsRouteLoading(false);
         }
       }
     },
+
     [],
   );
 
-  // IMPORTANT:
-  // A route is NOT requested until real GPS has been received.
+  /**
+  * IMPORTANT:
+  * A route is NOT requested until real GPS
+  * has been received.
+
+    */
+
   useEffect(() => {
     if (!hasLiveLocation) {
       return;
     }
 
-    const lastRequestedOrigin =
-      lastRequestedRouteOriginRef.current;
+    const lastRequestedOrigin = lastRequestedRouteOriginRef.current;
 
-    const noRouteRequestYet =
-      lastRequestedOrigin === null;
+    const noRouteRequestYet = lastRequestedOrigin === null;
 
-    const orderChanged =
-      lastRequestedStopOrderRef.current !==
-      stopOrderKey;
+    const orderChanged = lastRequestedStopOrderRef.current !== stopOrderKey;
 
     const partnerMovedEnough =
       lastRequestedOrigin !== null &&
       calculateDistanceKm(
         lastRequestedOrigin,
+
         partnerCoordinate,
       ) >= ROUTE_REROUTE_DISTANCE_KM;
 
     const enoughTimePassed =
-      Date.now() -
-        lastRouteRequestTimeRef.current >=
-      ROUTE_REQUEST_INTERVAL_MS;
+      Date.now() - lastRouteRequestTimeRef.current >= ROUTE_REQUEST_INTERVAL_MS;
 
     const shouldFetchRoute =
       noRouteRequestYet ||
       orderChanged ||
-      (partnerMovedEnough &&
-        enoughTimePassed);
+      (partnerMovedEnough && enoughTimePassed);
 
     if (!shouldFetchRoute) {
       return;
@@ -527,12 +571,8 @@ function NavigationScreen({
 
     const timeoutId = setTimeout(() => {
       fetchRoadRoute(
-        [
-          partnerCoordinate,
-          ...deliveryStops.map(
-            stop => stop.coordinate,
-          ),
-        ],
+        [partnerCoordinate, ...deliveryStops.map(stop => stop.coordinate)],
+
         stopOrderKey,
       );
     }, 200);
@@ -542,25 +582,29 @@ function NavigationScreen({
     };
   }, [
     hasLiveLocation,
+
     partnerCoordinate,
+
     deliveryStops,
+
     stopOrderKey,
+
     fetchRoadRoute,
   ]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      fitMapToAllStops();
+      if (hasLiveLocation) {
+        fitToCurrentStop();
+      } else {
+        fitMapToAllStops();
+      }
     }, 700);
 
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [
-    hasLiveLocation,
-    deliveryStops,
-    fitMapToAllStops,
-  ]);
+  }, [hasLiveLocation, deliveryStops, fitMapToAllStops, fitToCurrentStop]);
 
   useEffect(() => {
     return () => {
@@ -568,81 +612,84 @@ function NavigationScreen({
     };
   }, []);
 
-  const handleLocationUpdate = (
-    location: Location,
-  ) => {
-    const longitude =
-      location.coords.longitude;
+  const handleLocationUpdate = (location: Location) => {
+    const longitude = location.coords.longitude;
 
-    const latitude =
-      location.coords.latitude;
+    const latitude = location.coords.latitude;
 
-    if (
-      !Number.isFinite(longitude) ||
-      !Number.isFinite(latitude)
-    ) {
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
       return;
     }
 
-    setPartnerCoordinate([
-      longitude,
-      latitude,
-    ]);
+    setPartnerCoordinate([longitude, latitude]);
 
     if (
-      typeof location.coords.accuracy ===
-        'number' &&
-      Number.isFinite(
-        location.coords.accuracy,
-      )
+      typeof location.coords.accuracy === 'number' &&
+      Number.isFinite(location.coords.accuracy)
     ) {
-      setLocationAccuracy(
-        location.coords.accuracy,
-      );
+      setLocationAccuracy(location.coords.accuracy);
     }
 
-    // This triggers the route effect.
-    // The FIRST road route is therefore based
-    // on the real phone GPS location.
+    /**
+  * This triggers the route effect.
+  * The FIRST road route therefore starts from
+  * the actual phone GPS location.
+
+      */
+
     setHasLiveLocation(true);
+
+    const now = Date.now();
+    if (now - lastPartnerLocationPostRef.current >= 15000) {
+      lastPartnerLocationPostRef.current = now;
+      updatePartnerLocation(latitude, longitude).catch(() => {
+        lastPartnerLocationPostRef.current = 0;
+      });
+    }
   };
 
   const handleStartTracking = async () => {
     try {
-      const hasPermission =
-        await requestAndroidLocationPermissions();
+      const hasPermission = await requestAndroidLocationPermissions();
 
       if (!hasPermission) {
         setIsTracking(false);
+
         setHasLiveLocation(false);
 
         Alert.alert(
           'Location Permission Required',
+
           'DailyMart needs your location to calculate the real road route from your current position.',
         );
 
         return;
       }
 
-      // Clear old route information.
+      /**
+  * Clear previous route state before starting
+  * a fresh navigation session.
+
+        */
+
       setRouteShape(null);
+
       setRouteDistanceKm(null);
+
       setRouteDurationMinutes(null);
+
       setRouteError(null);
 
-      lastRequestedRouteOriginRef.current =
-        null;
+      lastRequestedRouteOriginRef.current = null;
 
-      lastRequestedStopOrderRef.current =
-        '';
+      lastRequestedStopOrderRef.current = '';
 
-      lastSuccessfulRouteOriginRef.current =
-        null;
+      lastSuccessfulRouteOriginRef.current = null;
 
-      lastRouteRequestTimeRef.current =
-        0;
+      lastRouteRequestTimeRef.current = 0;
 
       setHasLiveLocation(false);
+
       setIsTracking(true);
 
       setTimeout(() => {
@@ -650,10 +697,12 @@ function NavigationScreen({
       }, 500);
     } catch {
       setIsTracking(false);
+
       setHasLiveLocation(false);
 
       Alert.alert(
         'Location Error',
+
         'We could not request location permission. Please check your phone settings and try again.',
       );
     }
@@ -661,29 +710,31 @@ function NavigationScreen({
 
   const handleStopTracking = () => {
     setIsTracking(false);
+
     setHasLiveLocation(false);
 
     routeAbortControllerRef.current?.abort();
 
     setRouteShape(null);
+
     setRouteDistanceKm(null);
+
     setRouteDurationMinutes(null);
+
     setRouteError(null);
 
-    lastRequestedRouteOriginRef.current =
-      null;
+    lastRequestedRouteOriginRef.current = null;
 
-    lastRequestedStopOrderRef.current =
-      '';
+    lastRequestedStopOrderRef.current = '';
 
-    lastSuccessfulRouteOriginRef.current =
-      null;
+    lastSuccessfulRouteOriginRef.current = null;
   };
 
   const handleRetryRoute = () => {
     if (!hasLiveLocation) {
       Alert.alert(
         'Location Not Ready',
+
         'Wait until your current GPS location is available, then try again.',
       );
 
@@ -691,82 +742,125 @@ function NavigationScreen({
     }
 
     fetchRoadRoute(
-      [
-        partnerCoordinate,
-        ...deliveryStops.map(
-          stop => stop.coordinate,
-        ),
-      ],
+      [partnerCoordinate, ...deliveryStops.map(stop => stop.coordinate)],
+
       stopOrderKey,
     );
   };
 
+  const handleNavigateBack = () => {
+    handleStopTracking();
+    navigation.goBack();
+  };
+
+  const handleCallCustomer = () => {
+    const phone = currentStop?.customerPhone.replace(/[^\d+]/g, '') || '';
+    if (!phone) {
+      Alert.alert('Customer phone unavailable', 'This order does not contain a customer phone number.');
+      return;
+    }
+    Linking.openURL(`tel:${phone}`).catch(() =>
+      Alert.alert('Unable to call', 'This device cannot open the phone application.'),
+    );
+  };
+
+  const handleMessageCustomer = () => {
+    const phone = currentStop?.customerPhone.replace(/[^\d+]/g, '') || '';
+    if (!phone) {
+      Alert.alert('Customer phone unavailable', 'This order does not contain a customer phone number.');
+      return;
+    }
+    Linking.openURL(`sms:${phone}`).catch(() =>
+      Alert.alert('Unable to message', 'This device cannot open the messaging application.'),
+    );
+  };
+
+  const displayDistance =
+    routeDistanceKm !== null ? `${routeDistanceKm.toFixed(1)} km` : '—';
+
+  const displayEta =
+    routeDurationMinutes !== null ? `${routeDurationMinutes} min` : '—';
+
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-      edges={[
-        'top',
-        'left',
-        'right',
-      ]}
-    >
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      <View style={styles.screen}>
+        {/* ====================================================*
+
+             HEADER*
+
+         ===================================================== */}
+
         <View style={styles.header}>
-          <View>
-            <Text style={styles.pageLabel}>
-              Navigation
-            </Text>
-
-            <Text style={styles.title}>
-              {deliveryId}
-            </Text>
-
-            <Text style={styles.subtitle}>
-              {deliveryStops.length}{' '}
-              accepted deliveries
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.trackingBadge,
-              isTracking
-                ? styles.trackingBadgeActive
-                : styles.trackingBadgeInactive,
-            ]}
+          <Pressable
+            style={styles.headerIconButton}
+            onPress={handleNavigateBack}
           >
-            <View
-              style={[
-                styles.trackingDot,
-                isTracking
-                  ? styles.trackingDotActive
-                  : styles.trackingDotInactive,
-              ]}
-            />
+            <FontAwesomeIcon icon={faArrowLeft} size={16} color="#1F2937" />
+          </Pressable>
 
-            <Text
-              style={[
-                styles.trackingText,
-                isTracking
-                  ? styles.trackingTextActive
-                  : styles.trackingTextInactive,
-              ]}
-            >
-              {isTracking
-                ? hasLiveLocation
-                  ? 'LIVE'
-                  : 'LOCATING'
-                : 'NOT TRACKING'}
-            </Text>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>Navigation</Text>
+
+            <Text style={styles.headerSubtitle}>{deliveryId}</Text>
           </View>
+
+          <Pressable
+            style={styles.headerHelpButton}
+            onPress={() =>
+              Alert.alert(
+                'Help',
+
+                'Navigation support will be connected later.',
+              )
+            }
+          >
+            <FontAwesomeIcon icon={faBullseye} size={14} color="#2563EB" />
+
+            <Text style={styles.helpText}>Help</Text>
+          </Pressable>
         </View>
 
-        {/* Map */}
-        <View style={styles.mapCard}>
+        {/* ====================================================*
+
+             TURN / ROUTE INSTRUCTION*
+
+         ===================================================== */}
+
+        <View style={styles.turnBanner}>
+          <View style={styles.turnIconBox}>
+            <FontAwesomeIcon icon={faArrowUp} size={18} color="#FFFFFF" />
+          </View>
+
+          <View style={styles.turnTextBlock}>
+            <Text style={styles.turnTitle}>
+              {isTracking ? 'Continue straight' : 'Start navigation'}
+            </Text>
+
+            <Text style={styles.turnSubtitle}>
+              {isTracking
+                ? 'towards customer location'
+                : 'Route will be calculated from GPS'}
+            </Text>
+          </View>
+
+          <Text style={styles.turnDistance}>
+            {routeDistanceKm !== null
+              ? `${Math.max(
+                  100,
+
+                  Math.round(routeDistanceKm * 1000),
+                )} m`
+              : '—'}
+          </Text>
+        </View>
+
+        {/* ====================================================*
+
+             MAP*
+
+         ===================================================== */}
+
+        <View style={styles.mapContainer}>
           <Mapbox.MapView
             style={styles.map}
             styleURL={Mapbox.StyleURL.Street}
@@ -775,13 +869,12 @@ function NavigationScreen({
             <Mapbox.Camera
               ref={cameraRef}
               defaultSettings={{
-                centerCoordinate:
-                  INITIAL_PARTNER_COORDINATE,
+                centerCoordinate: INITIAL_PARTNER_COORDINATE,
+
                 zoomLevel: 13,
               }}
             />
 
-            {/* Real GPS */}
             {isTracking && (
               <Mapbox.UserLocation
                 visible
@@ -789,550 +882,385 @@ function NavigationScreen({
                 animated
                 androidRenderMode="gps"
                 showsUserHeadingIndicator
-                onUpdate={
-                  handleLocationUpdate
-                }
+                onUpdate={handleLocationUpdate}
               />
             )}
 
-            {/* Temporary / current partner marker */}
-            {(!isTracking ||
-              !hasLiveLocation) && (
+            {(!isTracking || !hasLiveLocation) && (
               <Mapbox.PointAnnotation
                 id="partner-location"
-                coordinate={
-                  partnerCoordinate
-                }
+                coordinate={partnerCoordinate}
                 title="Delivery Partner"
               >
-                <View
-                  style={
-                    styles.partnerMarker
-                  }
-                >
-                  <Text
-                    style={
-                      styles.partnerMarkerText
-                    }
-                  >
-                    P
-                  </Text>
+                <View style={styles.partnerMarker}>
+                  <Text style={styles.partnerMarkerText}>▲</Text>
                 </View>
               </Mapbox.PointAnnotation>
             )}
 
-            {/* Real road route only */}
             {routeShape !== null && (
-              <Mapbox.ShapeSource
-                id="delivery-route"
-                shape={routeShape}
-              >
+              <Mapbox.ShapeSource id="delivery-route" shape={routeShape}>
                 <Mapbox.LineLayer
                   id="delivery-route-line"
-                  style={
-                    DELIVERY_ROUTE_LINE_STYLE
-                  }
+                  style={DELIVERY_ROUTE_LINE_STYLE}
                 />
               </Mapbox.ShapeSource>
             )}
 
-            {/* Customer destinations */}
-            {deliveryStops.map(
-              (stop, index) => (
-                <Mapbox.PointAnnotation
-                  key={stop.id}
-                  id={stop.id}
-                  coordinate={
-                    stop.coordinate
-                  }
-                  title={`${index + 1}. ${stop.orderId}`}
-                >
-                  <View
-                    style={
-                      styles.destinationMarker
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.destinationMarkerText
-                      }
-                    >
-                      {index + 1}
-                    </Text>
-                  </View>
-                </Mapbox.PointAnnotation>
-              ),
-            )}
-
-            {/* Map overlay */}
-            <View style={styles.mapOverlay}>
-              <View
-                style={
-                  styles.mapOverlayHeader
-                }
-              >
-                <Text
-                  style={
-                    styles.mapOverlayTitle
-                  }
-                >
-                  Delivery Route
-                </Text>
-
-                {isRouteLoading && (
-                  <ActivityIndicator
-                    size="small"
-                    color="#2E7D32"
-                  />
-                )}
-              </View>
-
-              <Text
-                style={
-                  styles.mapOverlayText
-                }
-              >
-                P = partner • Numbers =
-                delivery order
-              </Text>
-            </View>
-          </Mapbox.MapView>
-        </View>
-
-        {/* Route information */}
-        <View style={styles.routeCard}>
-          <Text style={styles.cardTitle}>
-            Route Information
-          </Text>
-
-          <View style={styles.routeMetrics}>
-            <View style={styles.routeMetric}>
-              <Text style={styles.metricValue}>
-                {deliveryStops.length}
-              </Text>
-
-              <Text style={styles.metricLabel}>
-                Deliveries
-              </Text>
-            </View>
-
-            <View
-              style={styles.metricDivider}
-            />
-
-            <View style={styles.routeMetric}>
-              <Text style={styles.metricValue}>
-                {routeDistanceKm !== null
-                  ? `${routeDistanceKm.toFixed(1)} km`
-                  : '—'}
-              </Text>
-
-              <Text style={styles.metricLabel}>
-                Road distance
-              </Text>
-            </View>
-
-            <View
-              style={styles.metricDivider}
-            />
-
-            <View style={styles.routeMetric}>
-              <Text style={styles.metricValue}>
-                {routeDurationMinutes !== null
-                  ? `~${routeDurationMinutes} min`
-                  : '—'}
-              </Text>
-
-              <Text style={styles.metricLabel}>
-                Road ETA
-              </Text>
-            </View>
-          </View>
-
-          {!hasLiveLocation &&
-            !isRouteLoading && (
-              <Text
-                style={
-                  styles.routeDisclaimer
-                }
-              >
-                Waiting for your real GPS location
-                before calculating road distance.
-              </Text>
-            )}
-
-          {isRouteLoading && (
-            <Text
-              style={
-                styles.routeDisclaimer
-              }
-            >
-              Calculating the actual road route
-              from your current location...
-            </Text>
-          )}
-
-          {routeError !== null && (
-            <View
-              style={
-                styles.routeErrorBox
-              }
-            >
-              <Text
-                style={
-                  styles.routeErrorTitle
-                }
-              >
-                Road route unavailable
-              </Text>
-
-              <Text
-                style={
-                  styles.routeErrorText
-                }
-              >
-                {routeError}
-              </Text>
-
-              <Pressable
-                style={
-                  styles.retryRouteButton
-                }
-                onPress={
-                  handleRetryRoute
-                }
-              >
-                <Text
-                  style={
-                    styles.retryRouteButtonText
-                  }
-                >
-                  RETRY ROAD ROUTE
-                </Text>
-              </Pressable>
-            </View>
-          )}
-
-          {routeDistanceKm !== null &&
-            routeError === null && (
-              <Text
-                style={
-                  styles.routeDisclaimer
-                }
-              >
-                Distance and ETA are from the
-                current Mapbox driving route.
-              </Text>
-            )}
-        </View>
-
-        {/* Delivery stops */}
-        <View style={styles.stopsCard}>
-          <View style={styles.stopsHeader}>
-            <Text style={styles.cardTitle}>
-              Delivery Stops
-            </Text>
-
-            <Text
-              style={
-                styles.stopsHeaderText
-              }
-            >
-              Decide the order you want to
-              visit them.
-            </Text>
-          </View>
-
-          {deliveryStops.map(
-            (stop, index) => (
-              <View
+            {deliveryStops.map((stop, index) => (
+              <Mapbox.PointAnnotation
                 key={stop.id}
-                style={styles.stopCard}
+                id={stop.id}
+                coordinate={stop.coordinate}
+                title={`${index + 1}. ${stop.orderId}`}
               >
                 <View
-                  style={
-                    styles.stopNumber
-                  }
+                  style={[
+                    styles.destinationMarker,
+
+                    index === 0 && styles.destinationMarkerActive,
+                  ]}
                 >
                   <Text
-                    style={
-                      styles.stopNumberText
-                    }
+                    style={[
+                      styles.destinationMarkerText,
+
+                      index === 0 && styles.destinationMarkerTextActive,
+                    ]}
                   >
                     {index + 1}
                   </Text>
                 </View>
+              </Mapbox.PointAnnotation>
+            ))}
+          </Mapbox.MapView>
 
-                <View
-                  style={
-                    styles.stopInfo
-                  }
-                >
-                  <View
-                    style={
-                      styles.stopTopRow
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.stopOrderId
-                      }
-                    >
-                      {stop.orderId}
-                    </Text>
+          {/* Route loading */}
 
-                    <View
-                      style={[
-                        styles.paymentBadge,
-                        stop.paymentMethod ===
-                          'COD'
-                          ? styles.codBadge
-                          : styles.onlineBadge,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.paymentBadgeText,
-                          stop.paymentMethod ===
-                            'COD'
-                            ? styles.codText
-                            : styles.onlineText,
-                        ]}
-                      >
-                        {
-                          stop.paymentMethod
-                        }
-                      </Text>
-                    </View>
-                  </View>
+          {isRouteLoading && (
+            <View style={styles.loadingBadge}>
+              <ActivityIndicator size="small" color="#078D47" />
 
-                  <Text
-                    style={
-                      styles.customerName
-                    }
-                  >
-                    {stop.customerName}
-                  </Text>
+              <Text style={styles.loadingBadgeText}>Updating route...</Text>
+            </View>
+          )}
 
-                  <Text
-                    style={
-                      styles.stopAddress
-                    }
-                  >
-                    {stop.address}
-                  </Text>
+          {/* Map controls */}
 
-                  {stop.paymentMethod ===
-                    'COD' && (
-                    <Text
-                      style={
-                        styles.codAmount
-                      }
-                    >
-                      Collect NPR{' '}
-                      {stop.amount.toLocaleString()}
-                    </Text>
-                  )}
+          <View style={styles.mapControls}>
+            <Pressable
+              style={styles.mapControlButton}
+              onPress={() => setIsMuted(previous => !previous)}
+            >
+              <Text style={styles.mapControlIcon}>
+                <FontAwesomeIcon
+                  icon={isMuted ? faVolumeXmark : faVolumeHigh}
+                  size={17}
+                  color="#1F2937"
+                />
+              </Text>
+            </Pressable>
 
-                  <Text
-                    style={
-                      styles.stopCoordinateText
-                    }
-                  >
-                    {stop.coordinate[1].toFixed(
-                      4,
-                    )}
-                    ,{' '}
-                    {stop.coordinate[0].toFixed(
-                      4,
-                    )}
-                  </Text>
-                </View>
+            <Pressable
+              style={styles.mapControlButton}
+              onPress={fitToCurrentStop}
+            >
+              <FontAwesomeIcon
+                icon={faLocationCrosshairs}
+                size={18}
+                color="#1F2937"
+              />
+            </Pressable>
 
-                <View
-                  style={
-                    styles.reorderButtons
-                  }
-                >
-                  <Pressable
-                    style={[
-                      styles.reorderButton,
-                      index === 0 &&
-                        styles.reorderButtonDisabled,
-                    ]}
-                    disabled={index === 0}
-                    onPress={() =>
-                      moveStop(
-                        index,
-                        'up',
-                      )
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.reorderButtonText,
-                        index === 0 &&
-                          styles.reorderButtonTextDisabled,
-                      ]}
-                    >
-                      ↑
-                    </Text>
-                  </Pressable>
+            <Pressable
+              style={styles.mapControlButton}
+              onPress={fitMapToAllStops}
+            >
+              <FontAwesomeIcon icon={faRoute} size={18} color="#1F2937" />
+            </Pressable>
+          </View>
 
-                  <Pressable
-                    style={[
-                      styles.reorderButton,
-                      index ===
-                        deliveryStops.length -
-                          1 &&
-                        styles.reorderButtonDisabled,
-                    ]}
-                    disabled={
-                      index ===
-                      deliveryStops.length -
-                        1
-                    }
-                    onPress={() =>
-                      moveStop(
-                        index,
-                        'down',
-                      )
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.reorderButtonText,
-                        index ===
-                          deliveryStops.length -
-                            1 &&
-                          styles.reorderButtonTextDisabled,
-                      ]}
-                    >
-                      ↓
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            ),
+          {/* GPS accuracy */}
+
+          {hasLiveLocation && locationAccuracy !== null && (
+            <View style={styles.accuracyBadge}>
+              <View style={styles.accuracyDot} />
+
+              <Text style={styles.accuracyText}>
+                GPS ±{Math.round(locationAccuracy)} m
+              </Text>
+            </View>
+          )}
+
+          {/* Route failure */}
+
+          {routeError !== null && (
+            <View style={styles.routeErrorOverlay}>
+              <Text style={styles.routeErrorOverlayTitle}>
+                Route update unavailable
+              </Text>
+
+              <Text style={styles.routeErrorOverlayText}>{routeError}</Text>
+
+              <Pressable style={styles.retryButton} onPress={handleRetryRoute}>
+                <Text style={styles.retryButtonText}>RETRY</Text>
+              </Pressable>
+            </View>
           )}
         </View>
 
-        {/* Location status */}
-        <View
-          style={
-            styles.locationStatusCard
-          }
-        >
-          <View
-            style={[
-              styles.locationStatusIcon,
-              hasLiveLocation
-                ? styles.locationStatusIconActive
-                : styles.locationStatusIconInactive,
-            ]}
-          >
-            <Text
-              style={
-                styles.locationStatusIconText
-              }
-            >
-              {hasLiveLocation
-                ? '✓'
-                : '!'}
-            </Text>
-          </View>
+        {/* ====================================================*
 
-          <View
-            style={
-              styles.locationStatusInfo
-            }
-          >
-            <Text
-              style={
-                styles.locationStatusTitle
-              }
-            >
-              {hasLiveLocation
-                ? 'Live GPS location active'
-                : isTracking
-                  ? 'Finding your location...'
-                  : 'Location tracking not started'}
-            </Text>
+             BOTTOM NAVIGATION SHEET*
 
-            <Text
-              style={
-                styles.locationStatusText
-              }
+         ===================================================== */}
+
+        <View style={styles.bottomSheet}>
+          <View style={styles.bottomSheetHandle} />
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+            contentContainerStyle={styles.bottomSheetContent}
+          >
+            {/* ETA */}
+
+            <View style={styles.etaRow}>
+              <View>
+                <Text style={styles.etaText}>{displayEta}</Text>
+
+                <Text style={styles.arrivalText}>
+                  {displayDistance}
+
+                  {routeDurationMinutes !== null && ' • ETA from current route'}
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.statusBadge,
+
+                  isTracking ? styles.statusBadgeLive : styles.statusBadgeReady,
+                ]}
+              >
+                <View
+                  style={[
+                    styles.statusDot,
+
+                    isTracking ? styles.statusDotLive : styles.statusDotReady,
+                  ]}
+                />
+
+                <Text style={styles.statusBadgeText}>
+                  {isTracking
+                    ? hasLiveLocation
+                      ? 'LIVE'
+                      : 'LOCATING'
+                    : 'READY'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Customer */}
+
+            {currentStop && (
+              <View style={styles.customerCard}>
+                <View style={styles.customerAvatar}>
+                  <Text style={styles.customerAvatarText}>
+                    {currentStop.customerName.charAt(0)}
+                  </Text>
+                </View>
+
+                <View style={styles.customerInfo}>
+                  <Text style={styles.customerName}>
+                    {currentStop.customerName}
+                  </Text>
+
+                  <Text style={styles.customerAddress} numberOfLines={1}>
+                    {currentStop.address}
+                  </Text>
+
+                  <Text style={styles.customerOrder}>
+                    {currentStop.orderId}
+
+                    {' • '}
+
+                    {currentStop.paymentMethod === 'COD'
+                      ? `COD NPR ${currentStop.amount.toLocaleString()}`
+                      : 'Online payment'}
+                  </Text>
+                </View>
+
+                <View style={styles.customerActions}>
+                  <Pressable
+                    style={styles.customerActionButton}
+                    onPress={handleCallCustomer}
+                  >
+                    <FontAwesomeIcon icon={faPhone} size={16} color="#2563EB" />
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.customerActionButton}
+                    onPress={handleMessageCustomer}
+                  >
+                    <FontAwesomeIcon
+                      icon={faCommentDots}
+                      size={16}
+                      color="#2563EB"
+                    />
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {/* Main navigation button */}
+
+            {!isTracking ? (
+              <Pressable
+                style={styles.startNavigationButton}
+                onPress={handleStartTracking}
+              >
+                <FontAwesomeIcon
+                  icon={faLocationArrow}
+                  size={16}
+                  color="#FFFFFF"
+                />
+
+                <Text style={styles.navigationButtonText}>
+                  Start Navigation
+                </Text>
+
+                <FontAwesomeIcon
+                  icon={faArrowRight}
+                  size={16}
+                  color="#FFFFFF"
+                />
+              </Pressable>
+            ) : (
+              <Pressable
+                style={styles.endNavigationButton}
+                onPress={handleStopTracking}
+              >
+                <Text style={styles.endNavigationButtonText}>
+                  End Navigation
+                </Text>
+              </Pressable>
+            )}
+
+            {/* Route overview */}
+
+            <Pressable
+              style={styles.routeOverviewHeader}
+              onPress={() => setShowRouteOverview(previous => !previous)}
             >
-              {hasLiveLocation
-                ? locationAccuracy !==
-                  null
-                  ? `GPS accuracy is approximately ±${Math.round(
-                      locationAccuracy,
-                    )} m.`
-                  : 'Your current GPS position is being received.'
-                : isTracking
-                  ? 'Waiting for the phone to provide the current GPS position.'
-                  : 'Start tracking when you are ready to navigate to your delivery stops.'}
-            </Text>
-          </View>
+              <View>
+                <Text style={styles.routeOverviewTitle}>Route Overview</Text>
+
+                <Text style={styles.routeOverviewSubtitle}>
+                  {deliveryStops.length} delivery stops
+                </Text>
+              </View>
+
+              <Text style={styles.routeOverviewArrow}>
+                {showRouteOverview ? '⌃' : '⌄'}
+              </Text>
+            </Pressable>
+
+            {showRouteOverview && (
+              <View style={styles.routeOverviewPanel}>
+                {deliveryStops.map((stop, index) => (
+                  <View key={stop.id} style={styles.routeStopRow}>
+                    <View style={styles.routeStopNumber}>
+                      <Text style={styles.routeStopNumberText}>
+                        {index + 1}
+                      </Text>
+                    </View>
+
+                    <View style={styles.routeStopInfo}>
+                      <Text style={styles.routeStopOrder}>{stop.orderId}</Text>
+
+                      <Text style={styles.routeStopCustomer}>
+                        {stop.customerName}
+                      </Text>
+
+                      <Text style={styles.routeStopAddress}>
+                        {stop.address}
+                      </Text>
+                    </View>
+
+                    <View style={styles.reorderButtons}>
+                      <Pressable
+                        style={[
+                          styles.reorderButton,
+
+                          index === 0 && styles.reorderButtonDisabled,
+                        ]}
+                        disabled={index === 0}
+                        onPress={() =>
+                          moveStop(
+                            index,
+
+                            'up',
+                          )
+                        }
+                      >
+                        <FontAwesomeIcon
+                          icon={faArrowUp}
+                          size={12}
+                          color="#374151"
+                        />
+                      </Pressable>
+
+                      <Pressable
+                        style={[
+                          styles.reorderButton,
+
+                          index === deliveryStops.length - 1 &&
+                            styles.reorderButtonDisabled,
+                        ]}
+                        disabled={index === deliveryStops.length - 1}
+                        onPress={() =>
+                          moveStop(
+                            index,
+
+                            'down',
+                          )
+                        }
+                      >
+                        <FontAwesomeIcon
+                          icon={faArrowDown}
+                          size={12}
+                          color="#374151"
+                        />
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+
+                <Pressable
+                  style={styles.fitRouteButton}
+                  onPress={fitMapToAllStops}
+                >
+                  <Text style={styles.fitRouteButtonText}>FIT ALL STOPS</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {!hasLiveLocation && !isRouteLoading && (
+              <Text style={styles.routeDisclaimer}>
+                Start navigation to receive GPS location and calculate the real
+                Mapbox road route.
+              </Text>
+            )}
+
+            {routeDistanceKm !== null && routeError === null && (
+              <Text style={styles.routeDisclaimer}>
+                Distance and ETA are from the current Mapbox driving route.
+              </Text>
+            )}
+          </ScrollView>
         </View>
-
-        {/* Map control */}
-        <Pressable
-          style={
-            styles.fitRouteButton
-          }
-          onPress={
-            fitMapToAllStops
-          }
-        >
-          <Text
-            style={
-              styles.fitRouteButtonText
-            }
-          >
-            FIT ALL STOPS
-          </Text>
-        </Pressable>
-
-        {/* Tracking */}
-        {!isTracking ? (
-          <Pressable
-            style={
-              styles.trackingButton
-            }
-            onPress={
-              handleStartTracking
-            }
-          >
-            <Text
-              style={
-                styles.trackingButtonText
-              }
-            >
-              START LOCATION TRACKING
-            </Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            style={
-              styles.stopTrackingButton
-            }
-            onPress={
-              handleStopTracking
-            }
-          >
-            <Text
-              style={
-                styles.stopTrackingButtonText
-              }
-            >
-              STOP LOCATION TRACKING
-            </Text>
-          </Pressable>
-        )}
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -1340,91 +1268,196 @@ function NavigationScreen({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F7FAF7',
+
+    backgroundColor: '#FFFFFF',
   },
 
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 32,
+  screen: {
+    flex: 1,
+
+    backgroundColor: '#F5F8F6',
   },
+
+  /* ======================================================*
+
+      HEADER*
+
+   ======================================================= */
 
   header: {
+    height: 55,
+
+    backgroundColor: '#FFFFFF',
+
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
 
-  pageLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-
-  title: {
-    fontSize: 25,
-    fontWeight: '700',
-    color: '#111827',
-  },
-
-  subtitle: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#6B7280',
-  },
-
-  trackingBadge: {
-    flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 8,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
+
+    justifyContent: 'space-between',
+
+    paddingHorizontal: 8,
+
+    borderBottomWidth: 1,
+
+    borderBottomColor: '#EAEFED',
   },
 
-  trackingBadgeActive: {
-    backgroundColor: '#E8F5E9',
+  headerIconButton: {
+    width: 44,
+
+    height: 44,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
   },
 
-  trackingBadgeInactive: {
-    backgroundColor: '#F1F3F1',
+  backArrow: {
+    fontSize: 35,
+
+    lineHeight: 33,
+
+    color: '#202729',
   },
 
-  trackingDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    marginRight: 6,
+  headerCenter: {
+    flex: 1,
+
+    alignItems: 'center',
   },
 
-  trackingDotActive: {
-    backgroundColor: '#2E7D32',
+  headerTitle: {
+    fontSize: 18,
+
+    fontWeight: '800',
+
+    color: '#13191B',
   },
 
-  trackingDotInactive: {
-    backgroundColor: '#9CA3AF',
+  headerSubtitle: {
+    marginTop: 2,
+
+    fontSize: 9.5,
+
+    color: '#777F82',
   },
 
-  trackingText: {
-    fontSize: 8,
-    fontWeight: '700',
+  headerHelpButton: {
+    minWidth: 57,
+
+    height: 40,
+
+    paddingHorizontal: 4,
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
   },
 
-  trackingTextActive: {
-    color: '#2E7D32',
+  helpIcon: {
+    fontSize: 15,
+
+    color: '#078C46',
+
+    marginRight: 4,
   },
 
-  trackingTextInactive: {
-    color: '#6B7280',
+  helpText: {
+    fontSize: 11.5,
+
+    fontWeight: '800',
+
+    color: '#078C46',
   },
 
-  mapCard: {
-    height: 330,
-    borderRadius: 20,
-    overflow: 'hidden',
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#DCE5DC',
+  /* ======================================================*
+
+      TURN BANNER*
+
+   ======================================================= */
+
+  turnBanner: {
+    height: 65,
+
+    backgroundColor: '#079A49',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    paddingHorizontal: 12,
+  },
+
+  turnIconBox: {
+    width: 41,
+
+    height: 41,
+
+    borderRadius: 21,
+
+    backgroundColor: 'rgba(255,255,255,0.15)',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    marginRight: 9,
+  },
+
+  turnIcon: {
+    fontSize: 25,
+
+    fontWeight: '900',
+
+    color: '#FFFFFF',
+  },
+
+  turnTextBlock: {
+    flex: 1,
+  },
+
+  turnTitle: {
+    fontSize: 13.5,
+
+    fontWeight: '800',
+
+    color: '#FFFFFF',
+  },
+
+  turnSubtitle: {
+    marginTop: 2,
+
+    fontSize: 9.5,
+
+    color: '#DCF6E5',
+  },
+
+  turnDistance: {
+    fontSize: 15,
+
+    fontWeight: '800',
+
+    color: '#FFFFFF',
+
+    marginLeft: 8,
+  },
+
+  /* ======================================================*
+
+      MAP*
+
+   ======================================================= */
+
+  mapContainer: {
+    flex: 1,
+
+    position: 'relative',
+
+    backgroundColor: '#E5EDE4',
+
+    minHeight: 300,
   },
 
   map: {
@@ -1432,285 +1465,717 @@ const styles = StyleSheet.create({
   },
 
   partnerMarker: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#2E7D32',
+    width: 38,
+
+    height: 38,
+
+    borderRadius: 19,
+
+    backgroundColor: '#1687E8',
+
     borderWidth: 3,
+
     borderColor: '#FFFFFF',
+
     alignItems: 'center',
+
     justifyContent: 'center',
   },
 
   partnerMarkerText: {
+    fontSize: 17,
+
+    fontWeight: '900',
+
     color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
   },
 
   destinationMarker: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 32,
+
+    height: 32,
+
+    borderRadius: 16,
+
     backgroundColor: '#FFFFFF',
+
     borderWidth: 3,
-    borderColor: '#2E7D32',
+
+    borderColor: '#E54949',
+
     alignItems: 'center',
+
     justifyContent: 'center',
+  },
+
+  destinationMarkerActive: {
+    backgroundColor: '#E54949',
   },
 
   destinationMarkerText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#2E7D32',
-  },
-
-  mapOverlay: {
-    position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 14,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor:
-      'rgba(255,255,255,0.94)',
-  },
-
-  mapOverlayHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  mapOverlayTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-
-  mapOverlayText: {
-    marginTop: 3,
-    fontSize: 11,
-    color: '#6B7280',
-  },
-
-  routeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 17,
-    padding: 18,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#E5EAE5',
-  },
-
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 17,
-  },
-
-  routeMetrics: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  routeMetric: {
-    flex: 1,
-    alignItems: 'center',
-  },
-
-  metricValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#2E7D32',
-    textAlign: 'center',
-  },
-
-  metricLabel: {
-    marginTop: 4,
     fontSize: 10,
-    color: '#7A827A',
-    textAlign: 'center',
+
+    fontWeight: '900',
+
+    color: '#D63C3C',
   },
 
-  metricDivider: {
-    width: 1,
-    height: 32,
-    backgroundColor: '#E5E8E5',
-  },
-
-  routeDisclaimer: {
-    marginTop: 14,
-    fontSize: 10,
-    lineHeight: 15,
-    color: '#8A918A',
-    textAlign: 'center',
-  },
-
-  routeErrorBox: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: '#FFF7E6',
-  },
-
-  routeErrorTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#9A6700',
-  },
-
-  routeErrorText: {
-    marginTop: 4,
-    fontSize: 10,
-    lineHeight: 15,
-    color: '#7A5A00',
-  },
-
-  retryRouteButton: {
-    alignSelf: 'flex-start',
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#2E7D32',
-  },
-
-  retryRouteButtonText: {
-    fontSize: 10,
-    fontWeight: '800',
+  destinationMarkerTextActive: {
     color: '#FFFFFF',
   },
 
-  stopsCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 17,
-    padding: 17,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#E5EAE5',
+  mapControls: {
+    position: 'absolute',
+
+    right: 12,
+
+    top: 13,
+
+    gap: 8,
   },
 
-  stopsHeader: {
-    marginBottom: 4,
-  },
+  mapControlButton: {
+    width: 45,
 
-  stopsHeaderText: {
-    marginTop: -8,
-    marginBottom: 16,
-    fontSize: 11,
-    color: '#7A827A',
-  },
+    height: 45,
 
-  stopCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 14,
-    borderTopWidth: 1,
-    borderTopColor: '#EEF2EE',
-  },
+    borderRadius: 23,
 
-  stopNumber: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+
     alignItems: 'center',
+
     justifyContent: 'center',
-    marginRight: 11,
+
+    shadowColor: '#000000',
+
+    shadowOpacity: 0.12,
+
+    shadowRadius: 7,
+
+    shadowOffset: {
+      width: 0,
+
+      height: 2,
+    },
+
+    elevation: 3,
   },
 
-  stopNumberText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#2E7D32',
+  mapControlIcon: {
+    fontSize: 19,
+
+    color: '#343C3E',
   },
 
-  stopInfo: {
-    flex: 1,
-    paddingRight: 8,
-  },
+  loadingBadge: {
+    position: 'absolute',
 
-  stopTopRow: {
+    left: 12,
+
+    top: 13,
+
+    height: 34,
+
+    borderRadius: 17,
+
+    paddingHorizontal: 10,
+
+    backgroundColor: 'rgba(255,255,255,0.95)',
+
     flexDirection: 'row',
+
     alignItems: 'center',
-    justifyContent: 'space-between',
   },
 
-  stopOrderId: {
-    fontSize: 13,
+  loadingBadgeText: {
+    marginLeft: 7,
+
+    fontSize: 9.5,
+
+    fontWeight: '700',
+
+    color: '#586160',
+  },
+
+  accuracyBadge: {
+    position: 'absolute',
+
+    left: 12,
+
+    bottom: 12,
+
+    height: 30,
+
+    borderRadius: 15,
+
+    paddingHorizontal: 9,
+
+    backgroundColor: 'rgba(255,255,255,0.95)',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+  },
+
+  accuracyDot: {
+    width: 7,
+
+    height: 7,
+
+    borderRadius: 4,
+
+    backgroundColor: '#0A9B49',
+
+    marginRight: 6,
+  },
+
+  accuracyText: {
+    fontSize: 9.5,
+
+    fontWeight: '700',
+
+    color: '#596361',
+  },
+
+  routeErrorOverlay: {
+    position: 'absolute',
+
+    left: 12,
+
+    right: 70,
+
+    top: 13,
+
+    borderRadius: 11,
+
+    padding: 10,
+
+    backgroundColor: 'rgba(255,248,230,0.97)',
+
+    borderWidth: 1,
+
+    borderColor: '#F0D99D',
+  },
+
+  routeErrorOverlayTitle: {
+    fontSize: 10,
+
     fontWeight: '800',
-    color: '#1F2937',
+
+    color: '#8E6200',
+  },
+
+  routeErrorOverlayText: {
+    marginTop: 3,
+
+    fontSize: 9,
+
+    lineHeight: 13,
+
+    color: '#765800',
+  },
+
+  retryButton: {
+    alignSelf: 'flex-start',
+
+    marginTop: 7,
+
+    minHeight: 29,
+
+    borderRadius: 7,
+
+    paddingHorizontal: 9,
+
+    backgroundColor: '#078E47',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+  },
+
+  retryButtonText: {
+    fontSize: 8.5,
+
+    fontWeight: '800',
+
+    color: '#FFFFFF',
+  },
+
+  /* ======================================================*
+
+      BOTTOM SHEET*
+
+   ======================================================= */
+
+  bottomSheet: {
+    position: 'absolute',
+
+    left: 0,
+
+    right: 0,
+
+    bottom: 0,
+
+    maxHeight: '46%',
+
+    backgroundColor: '#FFFFFF',
+
+    borderTopLeftRadius: 22,
+
+    borderTopRightRadius: 22,
+
+    shadowColor: '#000000',
+
+    shadowOpacity: 0.14,
+
+    shadowRadius: 12,
+
+    shadowOffset: {
+      width: 0,
+
+      height: -3,
+    },
+
+    elevation: 8,
+
+    paddingTop: 7,
+  },
+
+  bottomSheetHandle: {
+    alignSelf: 'center',
+
+    width: 37,
+
+    height: 4,
+
+    borderRadius: 2,
+
+    backgroundColor: '#C7CDCA',
+
+    marginBottom: 8,
+  },
+
+  bottomSheetContent: {
+    paddingHorizontal: 13,
+
+    paddingBottom: 15,
+  },
+
+  /* ======================================================*
+
+      ETA*
+
+   ======================================================= */
+
+  etaRow: {
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    justifyContent: 'space-between',
+
+    marginBottom: 9,
+  },
+
+  etaText: {
+    fontSize: 25,
+
+    lineHeight: 28,
+
+    fontWeight: '800',
+
+    color: '#078F46',
+  },
+
+  arrivalText: {
+    marginTop: 2,
+
+    fontSize: 10,
+
+    color: '#747D7F',
+  },
+
+  statusBadge: {
+    height: 29,
+
+    borderRadius: 15,
+
+    paddingHorizontal: 9,
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+  },
+
+  statusBadgeLive: {
+    backgroundColor: '#E6F7EB',
+  },
+
+  statusBadgeReady: {
+    backgroundColor: '#F0F3F1',
+  },
+
+  statusDot: {
+    width: 7,
+
+    height: 7,
+
+    borderRadius: 4,
+
+    marginRight: 5,
+  },
+
+  statusDotLive: {
+    backgroundColor: '#0A9B49',
+  },
+
+  statusDotReady: {
+    backgroundColor: '#A4ABA8',
+  },
+
+  statusBadgeText: {
+    fontSize: 8.5,
+
+    fontWeight: '800',
+
+    color: '#4A5A51',
+  },
+
+  /* ======================================================*
+
+      CUSTOMER*
+
+   ======================================================= */
+
+  customerCard: {
+    minHeight: 63,
+
+    borderRadius: 12,
+
+    backgroundColor: '#F4F8F5',
+
+    borderWidth: 1,
+
+    borderColor: '#E3EAE5',
+
+    paddingHorizontal: 9,
+
+    paddingVertical: 8,
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    marginBottom: 8,
+  },
+
+  customerAvatar: {
+    width: 40,
+
+    height: 40,
+
+    borderRadius: 20,
+
+    backgroundColor: '#F0E4D4',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    marginRight: 8,
+  },
+
+  customerAvatarText: {
+    fontSize: 17,
+
+    fontWeight: '800',
+
+    color: '#604A38',
+  },
+
+  customerInfo: {
+    flex: 1,
+
+    minWidth: 0,
   },
 
   customerName: {
-    marginTop: 5,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#374151',
-  },
+    fontSize: 12.5,
 
-  stopAddress: {
-    marginTop: 3,
-    fontSize: 11,
-    color: '#7A827A',
-  },
-
-  codAmount: {
-    marginTop: 6,
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#9A6700',
-  },
-
-  stopCoordinateText: {
-    marginTop: 4,
-    fontSize: 9,
-    color: '#A0A7A0',
-  },
-
-  paymentBadge: {
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-  },
-
-  codBadge: {
-    backgroundColor: '#FFF7E6',
-  },
-
-  onlineBadge: {
-    backgroundColor: '#E8F5E9',
-  },
-
-  paymentBadgeText: {
-    fontSize: 8,
     fontWeight: '800',
+
+    color: '#232A2C',
   },
 
-  codText: {
-    color: '#9A6700',
+  customerAddress: {
+    marginTop: 2,
+
+    fontSize: 9.5,
+
+    color: '#697276',
   },
 
-  onlineText: {
-    color: '#2E7D32',
+  customerOrder: {
+    marginTop: 2,
+
+    fontSize: 8.5,
+
+    color: '#858D90',
+  },
+
+  customerActions: {
+    flexDirection: 'row',
+
+    gap: 5,
+
+    marginLeft: 6,
+  },
+
+  customerActionButton: {
+    width: 31,
+
+    height: 31,
+
+    borderRadius: 16,
+
+    backgroundColor: '#FFFFFF',
+
+    borderWidth: 1,
+
+    borderColor: '#D7E2DB',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+  },
+
+  customerActionIcon: {
+    fontSize: 10,
+
+    color: '#078D46',
+  },
+
+  /* ======================================================*
+
+      NAVIGATION BUTTONS*
+
+   ======================================================= */
+
+  startNavigationButton: {
+    height: 50,
+
+    borderRadius: 11,
+
+    backgroundColor: '#079A49',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+  },
+
+  navigationButtonIcon: {
+    fontSize: 17,
+
+    color: '#FFFFFF',
+
+    marginRight: 7,
+
+    transform: [
+      {
+        rotate: '-35deg',
+      },
+    ],
+  },
+
+  navigationButtonText: {
+    fontSize: 13.5,
+
+    fontWeight: '800',
+
+    color: '#FFFFFF',
+  },
+
+  navigationButtonArrow: {
+    fontSize: 21,
+
+    color: '#FFFFFF',
+
+    marginLeft: 9,
+  },
+
+  endNavigationButton: {
+    height: 50,
+
+    borderRadius: 11,
+
+    backgroundColor: '#FDE7E5',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+  },
+
+  endNavigationButtonText: {
+    fontSize: 13,
+
+    fontWeight: '800',
+
+    color: '#D62E27',
+  },
+
+  /* ======================================================*
+
+      ROUTE OVERVIEW*
+
+   ======================================================= */
+
+  routeOverviewHeader: {
+    minHeight: 48,
+
+    marginTop: 8,
+
+    borderRadius: 10,
+
+    backgroundColor: '#F4F7F5',
+
+    paddingHorizontal: 11,
+
+    paddingVertical: 7,
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+
+    justifyContent: 'space-between',
+  },
+
+  routeOverviewTitle: {
+    fontSize: 11.5,
+
+    fontWeight: '800',
+
+    color: '#2B3335',
+  },
+
+  routeOverviewSubtitle: {
+    marginTop: 2,
+
+    fontSize: 8.5,
+
+    color: '#788185',
+  },
+
+  routeOverviewArrow: {
+    fontSize: 20,
+
+    color: '#5E6769',
+  },
+
+  routeOverviewPanel: {
+    marginTop: 7,
+
+    borderRadius: 10,
+
+    backgroundColor: '#F8FAF9',
+
+    paddingHorizontal: 8,
+  },
+
+  routeStopRow: {
+    minHeight: 56,
+
+    borderBottomWidth: 1,
+
+    borderBottomColor: '#E8ECE9',
+
+    flexDirection: 'row',
+
+    alignItems: 'center',
+  },
+
+  routeStopNumber: {
+    width: 29,
+
+    height: 29,
+
+    borderRadius: 15,
+
+    backgroundColor: '#E2F5E7',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    marginRight: 8,
+  },
+
+  routeStopNumberText: {
+    fontSize: 10.5,
+
+    fontWeight: '800',
+
+    color: '#078E47',
+  },
+
+  routeStopInfo: {
+    flex: 1,
+
+    minWidth: 0,
+  },
+
+  routeStopOrder: {
+    fontSize: 10.5,
+
+    fontWeight: '800',
+
+    color: '#293133',
+  },
+
+  routeStopCustomer: {
+    marginTop: 1,
+
+    fontSize: 9.5,
+
+    fontWeight: '600',
+
+    color: '#5D6669',
+  },
+
+  routeStopAddress: {
+    marginTop: 1,
+
+    fontSize: 8.5,
+
+    color: '#7C8588',
   },
 
   reorderButtons: {
-    justifyContent: 'center',
-    gap: 6,
+    flexDirection: 'row',
+
+    gap: 4,
+
+    marginLeft: 5,
   },
 
   reorderButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: '#F4F7F4',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 29,
+
+    height: 29,
+
+    borderRadius: 7,
+
+    backgroundColor: '#FFFFFF',
+
     borderWidth: 1,
-    borderColor: '#DCE5DC',
+
+    borderColor: '#D8E1DC',
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
   },
 
   reorderButtonDisabled: {
@@ -1718,111 +2183,55 @@ const styles = StyleSheet.create({
   },
 
   reorderButtonText: {
-    fontSize: 17,
+    fontSize: 15,
+
     fontWeight: '800',
-    color: '#2E7D32',
-  },
 
-  reorderButtonTextDisabled: {
-    color: '#7A827A',
-  },
-
-  locationStatusCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 17,
-    padding: 17,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#E5EAE5',
-  },
-
-  locationStatusIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-
-  locationStatusIconActive: {
-    backgroundColor: '#E8F5E9',
-  },
-
-  locationStatusIconInactive: {
-    backgroundColor: '#FFF7E6',
-  },
-
-  locationStatusIconText: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#2E7D32',
-  },
-
-  locationStatusInfo: {
-    flex: 1,
-  },
-
-  locationStatusTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-
-  locationStatusText: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: '#667066',
+    color: '#078D46',
   },
 
   fitRouteButton: {
-    height: 52,
-    borderRadius: 11,
+    height: 39,
+
+    borderRadius: 9,
+
     backgroundColor: '#FFFFFF',
+
     borderWidth: 1,
-    borderColor: '#2E7D32',
+
+    borderColor: '#078D46',
+
     alignItems: 'center',
+
     justifyContent: 'center',
-    marginBottom: 11,
+
+    marginVertical: 8,
   },
 
   fitRouteButtonText: {
-    fontSize: 14,
+    fontSize: 9.5,
+
     fontWeight: '800',
-    color: '#2E7D32',
+
+    color: '#078D46',
   },
 
-  trackingButton: {
-    height: 54,
-    borderRadius: 12,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  /* ======================================================*
 
-  trackingButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
+      DISCLAIMER*
 
-  stopTrackingButton: {
-    height: 54,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#B42318',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+   ======================================================= */
 
-  stopTrackingButtonText: {
-    color: '#B42318',
-    fontSize: 14,
-    fontWeight: '800',
+  routeDisclaimer: {
+    marginTop: 8,
+
+    fontSize: 9,
+
+    lineHeight: 13,
+
+    color: '#8A9294',
+
+    textAlign: 'center',
   },
 });
 

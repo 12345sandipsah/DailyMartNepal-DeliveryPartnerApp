@@ -1,14 +1,13 @@
-import React from 'react';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import React from 'react';
+import {createNativeStackNavigator} from '@react-navigation/native-stack';
+
+import WelcomeScreen from '../../features/auth/screens/WelcomeScreen';
 import LoginScreen from '../../features/auth/screens/LoginScreen';
-import OtpScreen from '../../features/auth/screens/OtpScreen';
 
 export type AuthStackParamList = {
+  Welcome: undefined;
   Login: undefined;
-  Otp: {
-    phone: string;
-  };
 };
 
 type AuthNavigatorProps = {
@@ -17,22 +16,18 @@ type AuthNavigatorProps = {
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 
-function AuthNavigator({ onAuthenticated }: AuthNavigatorProps) {
+function AuthNavigator({onAuthenticated}: AuthNavigatorProps) {
   return (
     <Stack.Navigator
-      initialRouteName="Login"
+      initialRouteName="Welcome"
       screenOptions={{
         headerShown: false,
-      }}
-    >
-      <Stack.Screen
-        name="Login"
-        component={LoginScreen}
-      />
+      }}>
+      <Stack.Screen name="Welcome" component={WelcomeScreen} />
 
-      <Stack.Screen name="Otp">
+      <Stack.Screen name="Login">
         {props => (
-          <OtpScreen
+          <LoginScreen
             {...props}
             onAuthenticated={onAuthenticated}
           />

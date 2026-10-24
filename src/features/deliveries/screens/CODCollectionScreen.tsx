@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
 
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -12,1057 +13,799 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
+import {
+  collectCash,
+  getDelivery,
+  type OrderRecord,
+} from '../../../shared/services/api';
 
-import { SafeAreaView } from 'react-native-safe-area-context';
-
-import type {
-  NativeStackScreenProps,
-} from '@react-navigation/native-stack';
-
-import type {
+type CODCollectionScreenProps = NativeStackScreenProps<
   MainStackParamList,
-} from '../../../app/navigation/MainNavigator';
+  'CODCollection'
+>;
 
-type CODCollectionScreenProps =
-  NativeStackScreenProps<
-    MainStackParamList,
-    'CODCollection'
-  >;
+type PaymentMethod = 'COD' | 'ESEWA' | 'KHALTI';
+type PaymentStatus = 'PENDING' | 'PAID' | 'COLLECTED';
 
-type PaymentMethod =
-  | 'CASH'
-  | 'ESEWA'
-  | 'KHALTI';
+type PaymentConfig = {
+  method: PaymentMethod;
+  status: PaymentStatus;
+  amount: number;
+};
 
-type PaymentStatus =
-  | 'PENDING'
-  | 'COLLECTED';
-
-const EXPECTED_AMOUNT = 850;
+function getPaymentMethodLabel(method: PaymentMethod): string {
+  switch (method) {
+    case 'ESEWA':
+      return 'eSewa';
+    case 'KHALTI':
+      return 'Khalti';
+    case 'COD':
+    default:
+      return 'Cash on Delivery';
+  }
+}
 
 function CODCollectionScreen({
   route,
   navigation,
 }: CODCollectionScreenProps) {
-  const { deliveryId } = route.params;
+  const {deliveryId} = route.params;
 
-  const [
-    collectedAmount,
-    setCollectedAmount,
-  ] = useState(
-    String(EXPECTED_AMOUNT),
+  const [delivery, setDelivery] = useState<OrderRecord | null>(null);
+  const [isLoadingOrder, setIsLoadingOrder] = useState(true);
+  const [paymentConfig, setPaymentConfig] = useState<PaymentConfig>({
+    method: 'COD',
+    status: 'PENDING',
+    amount: 0,
+  });
+
+  useEffect(() => {
+    let active = true;
+    setIsLoadingOrder(true);
+    getDelivery(deliveryId.replace(/^#/, ''))
+      .then(order => {
+        if (!active) return;
+        setDelivery(order);
+        const method: PaymentMethod = order.paymentMethod === 'esewa'
+          ? 'ESEWA'
+          : order.paymentMethod === 'khalti'
+            ? 'KHALTI'
+            : 'COD';
+        const isPaid = String(order.paymentStatus).toLowerCase() === 'paid';
+        const status: PaymentStatus = isPaid
+          ? method === 'COD' ? 'COLLECTED' : 'PAID'
+          : 'PENDING';
+        const amount = Number(order.total || 0);
+        setPaymentConfig({method, status, amount});
+        setPaymentStatus(status);
+        setCollectedAmount(String(amount));
+      })
+      .catch(error => {
+        if (active) {
+          Alert.alert(
+            'Payment details unavailable',
+            error instanceof Error ? error.message : 'Unable to load the order amount.',
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoadingOrder(false);
+      });
+    return () => { active = false; };
+  }, [deliveryId]);
+
+  const isCOD = paymentConfig.method === 'COD';
+  const isOnlinePayment =
+    paymentConfig.method === 'ESEWA' ||
+    paymentConfig.method === 'KHALTI';
+
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(
+    paymentConfig.status,
   );
+  const [collectedAmount, setCollectedAmount] = useState(
+    String(paymentConfig.amount),
+  );
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [amountTouched, setAmountTouched] = useState(false);
 
-  const [
-    paymentMethod,
-    setPaymentMethod,
-  ] = useState<PaymentMethod>('CASH');
+  // Synchronous guards prevent rapid duplicate actions before React rerenders.
+  const processingRef = useRef(false);
 
-  const [
-    paymentStatus,
-    setPaymentStatus,
-  ] = useState<PaymentStatus>('PENDING');
 
-  const [
-    isProcessing,
-    setIsProcessing,
-  ] = useState(false);
+  const numericCollectedAmount = useMemo(() => {
+    if (collectedAmount.trim() === '') {
+      return 0;
+    }
 
-  const [
-    notes,
-    setNotes,
-  ] = useState('');
-
-  const [
-    showConfirmModal,
-    setShowConfirmModal,
-  ] = useState(false);
-
-  const numericCollectedAmount =
-    useMemo(() => {
-      const parsedAmount =
-        Number(collectedAmount);
-
-      if (!Number.isFinite(parsedAmount)) {
-        return 0;
-      }
-
-      return parsedAmount;
-    }, [collectedAmount]);
+    const parsedAmount = Number(collectedAmount);
+    return Number.isFinite(parsedAmount) ? parsedAmount : 0;
+  }, [collectedAmount]);
 
   const amountMatches =
-    numericCollectedAmount ===
-    EXPECTED_AMOUNT;
+    collectedAmount.trim() !== '' &&
+    numericCollectedAmount === paymentConfig.amount;
 
-  const remainingAmount =
-    Math.max(
-      EXPECTED_AMOUNT -
-        numericCollectedAmount,
-      0,
-    );
+  const remainingAmount = Math.max(
+    paymentConfig.amount - numericCollectedAmount,
+    0,
+  );
 
-  const changeAmount =
-    Math.max(
-      numericCollectedAmount -
-        EXPECTED_AMOUNT,
-      0,
-    );
+  const changeAmount = Math.max(
+    numericCollectedAmount - paymentConfig.amount,
+    0,
+  );
 
-  const handleAmountChange = (
-    value: string,
-  ) => {
-    const numericValue =
-      value.replace(/\D/g, '');
+  const isPaymentComplete =
+    paymentStatus === 'PAID' || paymentStatus === 'COLLECTED';
 
-    setCollectedAmount(
-      numericValue,
-    );
+  const paymentMethodLabel = getPaymentMethodLabel(paymentConfig.method);
 
-    if (
-      paymentStatus ===
-      'COLLECTED'
-    ) {
-      setPaymentStatus('PENDING');
-    }
+  const paymentStatusLabel =
+    paymentStatus === 'PAID'
+      ? isOnlinePayment
+        ? 'Paid Online'
+        : 'Paid'
+      : paymentStatus === 'COLLECTED'
+        ? 'Collected'
+        : 'Pending';
+
+  const amountError =
+    !amountTouched
+      ? ''
+      : collectedAmount.trim() === ''
+        ? 'Please enter the amount received.'
+        : numericCollectedAmount <= 0
+          ? 'The collected amount must be greater than zero.'
+          : !amountMatches
+            ? 'The amount must match the exact order amount.'
+            : '';
+
+  const handleAmountChange = (value: string) => {
+    // Accept digits only; do not allow negative values or decimals.
+    const numericValue = value.replace(/\D/g, '').slice(0, 7);
+
+    setCollectedAmount(numericValue);
+    setAmountTouched(true);
   };
 
-  const handlePaymentMethodChange = (
-    method: PaymentMethod,
-  ) => {
-    if (paymentStatus === 'COLLECTED') {
+  const handleConfirmCash = () => {
+    if (isLoadingOrder || !delivery) {
+      Alert.alert('Order unavailable', 'Load the assigned order details before collecting payment.');
+      return;
+    }
+    if (processingRef.current || isProcessing) {
       return;
     }
 
-    setPaymentMethod(method);
-    setPaymentStatus('PENDING');
-  };
+    setAmountTouched(true);
 
-  const handleCollectPayment = () => {
-    if (isProcessing) {
+    if (!isCOD) {
+      Alert.alert(
+        'Cash Collection Not Allowed',
+        'This order uses online payment. Do not collect cash from the customer.',
+      );
       return;
     }
 
-    if (
-      !collectedAmount.trim()
-    ) {
+    if (paymentStatus !== 'PENDING') {
+      Alert.alert(
+        'Payment Already Processed',
+        'This payment is no longer pending.',
+      );
       return;
     }
 
-    if (
-      !Number.isFinite(
-        numericCollectedAmount,
-      ) ||
-      numericCollectedAmount <= 0
-    ) {
+    if (collectedAmount.trim() === '' || numericCollectedAmount <= 0) {
+      Alert.alert(
+        'Invalid Amount',
+        'Enter a collected amount greater than zero.',
+      );
       return;
     }
 
     if (!amountMatches) {
+      Alert.alert(
+        'Amount Mismatch',
+        `The exact amount to collect is NPR ${paymentConfig.amount}. Please correct the amount before continuing.`,
+      );
       return;
     }
 
     setShowConfirmModal(true);
   };
 
-  const handleConfirmCollection = () => {
-    if (isProcessing) {
+  const handleConfirmCashCollection = async () => {
+    if (processingRef.current || isProcessing || !delivery || !showConfirmModal || !isCOD || !amountMatches || paymentStatus !== 'PENDING') return;
+    processingRef.current = true;
+    setIsProcessing(true);
+    try {
+      await collectCash(deliveryId.replace(/^#/, ''), numericCollectedAmount);
+      setPaymentStatus('COLLECTED');
+      setShowConfirmModal(false);
+      Alert.alert('Cash collection recorded', 'DailyMart recorded the exact COD amount against this order.');
+    } catch (error) {
+      Alert.alert('Cash collection failed', error instanceof Error ? error.message : 'Please retry.');
+    } finally {
+      setIsProcessing(false);
+      processingRef.current = false;
+    }
+  };
+  const handleVerifyOnlinePayment = () => {
+    if (isProcessing || isLoadingOrder) return;
+    setIsProcessing(true);
+    getDelivery(deliveryId.replace(/^#/, ''))
+      .then(order => {
+        setDelivery(order);
+        const isPaid = String(order.paymentStatus).toLowerCase() === 'paid';
+        const status: PaymentStatus = isPaid
+          ? order.paymentMethod === 'cod' ? 'COLLECTED' : 'PAID'
+          : 'PENDING';
+        setPaymentStatus(status);
+        setPaymentConfig(current => ({...current, status, amount: Number(order.total || 0)}));
+        Alert.alert(
+          'Payment status refreshed',
+          status === 'PAID'
+            ? 'DailyMart has recorded this online payment as paid. Do not collect cash.'
+            : 'DailyMart still shows this payment as pending. Do not collect cash; contact warehouse support if the customer says they paid.',
+        );
+      })
+      .catch(error => {
+        Alert.alert('Could not refresh payment', error instanceof Error ? error.message : 'Please try again.');
+      })
+      .finally(() => setIsProcessing(false));
+  };
+  const handleContinue = () => {
+    if (!isPaymentComplete) {
+      Alert.alert(
+        'Payment Incomplete',
+        'Complete the required payment step before continuing.',
+      );
       return;
     }
 
-    setIsProcessing(true);
+    if (isCOD && paymentStatus !== 'COLLECTED') {
+      Alert.alert(
+        'Collection Required',
+        'Confirm cash collection before continuing.',
+      );
+      return;
+    }
 
-    /*
-     * Temporary frontend simulation.
-     *
-     * Later:
-     * - CASH will be recorded as cash collection.
-     * - ESEWA will be verified using the backend payment gateway API.
-     * - KHALTI will be verified using the backend payment gateway API.
-     */
-    setTimeout(() => {
-      setPaymentStatus('COLLECTED');
-      setIsProcessing(false);
-      setShowConfirmModal(false);
-    }, 400);
+    navigation.navigate('DeliveryCompletion', {deliveryId});
   };
 
-  const handleCancelCollection = () => {
-    if (isProcessing) {
+  const handlePaymentIssue = () => {
+    navigation.navigate('FailedDelivery', {deliveryId});
+  };
+
+  const handleCloseConfirmModal = () => {
+    if (processingRef.current || isProcessing) {
       return;
     }
 
     setShowConfirmModal(false);
   };
 
-  const handleContinue = () => {
-    if (
-      paymentStatus !==
-      'COLLECTED'
-    ) {
-      return;
-    }
-
-    navigation.navigate(
-      'DeliveryCompletion',
-      {
-        deliveryId,
-      },
-    );
-  };
-
-  const handlePaymentIssue = () => {
-    navigation.navigate(
-      'FailedDelivery',
-      {
-        deliveryId,
-      },
-    );
-  };
-
-  const getPaymentMethodName = () => {
-    switch (paymentMethod) {
-      case 'ESEWA':
-        return 'eSewa';
-
-      case 'KHALTI':
-        return 'Khalti';
-
-      case 'CASH':
-      default:
-        return 'Cash';
-    }
-  };
-
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-    >
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor="#FFFFFF"
-      />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={
-          Platform.OS === 'ios'
-            ? 'padding'
-            : undefined
-        }
-      >
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           style={styles.flex}
-          contentContainerStyle={
-            styles.content
-          }
-          showsVerticalScrollIndicator={
-            false
-          }
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Header */}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled">
+          <View style={styles.header}>
+            <Pressable
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+              accessibilityRole="button"
+              accessibilityLabel="Go back">
+              <Text style={styles.backArrow}>‹</Text>
+            </Pressable>
 
-          <View
-            style={styles.header}
-          >
-            <View
-              style={styles.headerIcon}
-            >
-              <Text
-                style={
-                  styles.headerIconText
-                }
-              >
-                NPR
-              </Text>
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerTitle}>Payment Collection</Text>
+              <Text style={styles.headerSubtitle}>{deliveryId}</Text>
             </View>
 
-            <View
-              style={
-                styles.headerTextContainer
-              }
-            >
-              <Text
-                style={styles.title}
-              >
-                Collect Payment
-              </Text>
-
-              <Text
-                style={styles.subtitle}
-              >
-                Collect the payment from the
-                customer before completing the
-                delivery.
-              </Text>
-            </View>
+            <View style={styles.headerSpacer} />
           </View>
 
-          {/* Order Payment */}
-
-          <View style={styles.card}>
-            <View
-              style={
-                styles.cardHeader
-              }
-            >
-              <Text
-                style={styles.cardTitle}
-              >
-                ORDER PAYMENT
-              </Text>
-
+          <View style={styles.progressCard}>
+            <View style={styles.progressTrack}>
               <View
-                style={styles.codBadge}
-              >
-                <Text
-                  style={
-                    styles.codBadgeText
-                  }
-                >
-                  COD
-                </Text>
-              </View>
-            </View>
-
-            <View
-              style={styles.divider}
-            />
-
-            <View
-              style={styles.infoRow}
-            >
-              <Text
-                style={styles.infoLabel}
-              >
-                Delivery ID
-              </Text>
-
-              <Text
-                style={styles.infoValue}
-                numberOfLines={1}
-              >
-                {deliveryId}
-              </Text>
-            </View>
-
-            <View
-              style={styles.infoRow}
-            >
-              <Text
-                style={styles.infoLabel}
-              >
-                Payment Status
-              </Text>
-
-              <Text
+                style={[styles.progressStep, styles.progressStepDone]}
+              />
+              <View
                 style={[
-                  styles.infoValue,
-                  paymentStatus ===
-                    'COLLECTED'
-                    ? styles.collectedText
-                    : styles.pendingText,
+                  styles.progressStep,
+                  isPaymentComplete
+                    ? styles.progressStepDone
+                    : styles.progressStepActive,
                 ]}
-              >
-                {paymentStatus ===
-                'COLLECTED'
-                  ? 'Collected'
-                  : 'Pending'}
-              </Text>
-            </View>
-          </View>
-
-          {/* Amount */}
-
-          <View style={styles.card}>
-            <Text
-              style={styles.cardTitle}
-            >
-              AMOUNT TO COLLECT
-            </Text>
-
-            <View
-              style={
-                styles.expectedAmountBox
-              }
-            >
-              <Text
-                style={
-                  styles.expectedAmountLabel
-                }
-              >
-                Expected amount
-              </Text>
-
-              <Text
-                style={
-                  styles.expectedAmount
-                }
-              >
-                NPR {EXPECTED_AMOUNT}
-              </Text>
-            </View>
-
-            <View
-              style={
-                styles.amountInputContainer
-              }
-            >
-              <Text
-                style={
-                  styles.currencyText
-                }
-              >
-                NPR
-              </Text>
-
-              <TextInput
-                value={collectedAmount}
-                onChangeText={
-                  handleAmountChange
-                }
-                keyboardType="number-pad"
-                placeholder="Enter amount"
-                placeholderTextColor="#9CA3AF"
-                style={
-                  styles.amountInput
-                }
-                editable={
-                  paymentStatus !==
-                  'COLLECTED'
-                }
+              />
+              <View
+                style={[
+                  styles.progressStep,
+                  isPaymentComplete
+                    ? styles.progressStepDone
+                    : styles.progressStepPending,
+                ]}
               />
             </View>
 
-            {remainingAmount > 0 && (
-              <View
-                style={
-                  styles.remainingBox
-                }
-              >
-                <Text
-                  style={
-                    styles.remainingLabel
-                  }
-                >
-                  Remaining
-                </Text>
-
-                <Text
-                  style={
-                    styles.remainingValue
-                  }
-                >
-                  NPR {remainingAmount}
-                </Text>
-              </View>
-            )}
-
-            {changeAmount > 0 && (
-              <View
-                style={
-                  styles.changeBox
-                }
-              >
-                <Text
-                  style={
-                    styles.changeLabel
-                  }
-                >
-                  Change to customer
-                </Text>
-
-                <Text
-                  style={
-                    styles.changeValue
-                  }
-                >
-                  NPR {changeAmount}
-                </Text>
-              </View>
-            )}
-
-            {amountMatches && (
-              <View
-                style={
-                  styles.amountSuccessBox
-                }
-              >
-                <View
-                  style={
-                    styles.successCircle
-                  }
-                >
-                  <Text
-                    style={
-                      styles.successCircleText
-                    }
-                  >
-                    ✓
-                  </Text>
-                </View>
-
-                <View
-                  style={
-                    styles.amountSuccessContent
-                  }
-                >
-                  <Text
-                    style={
-                      styles.amountSuccessTitle
-                    }
-                  >
-                    Full amount entered
-                  </Text>
-
-                  <Text
-                    style={
-                      styles.amountSuccessText
-                    }
-                  >
-                    NPR {EXPECTED_AMOUNT} matches
-                    the expected payment amount.
-                  </Text>
-                </View>
-              </View>
-            )}
+            <View style={styles.progressLabels}>
+              <Text style={styles.progressLabelDone}>Verified</Text>
+              <Text
+                style={[
+                  styles.progressLabel,
+                  !isPaymentComplete && styles.progressLabelActive,
+                ]}>
+                Payment
+              </Text>
+              <Text
+                style={[
+                  styles.progressLabel,
+                  isPaymentComplete && styles.progressLabelDone,
+                ]}>
+                Complete
+              </Text>
+            </View>
           </View>
-
-          {/* Payment Method */}
 
           <View style={styles.card}>
-            <Text
-              style={styles.cardTitle}
-            >
-              PAYMENT METHOD
-            </Text>
+            <View style={styles.customerHeader}>
+              <View style={styles.customerAvatar}>
+                <Text style={styles.customerAvatarText}>
+                  {(delivery?.deliveryLocation?.name || delivery?.customer?.fullName || 'C').charAt(0).toUpperCase()}
+                </Text>
+                <View style={styles.customerOnlineDot} />
+              </View>
 
-            {/* Cash */}
-
-            <Pressable
-              style={[
-                styles.paymentMethodCard,
-                paymentMethod ===
-                  'CASH' &&
-                  styles.paymentMethodSelected,
-              ]}
-              onPress={() =>
-                handlePaymentMethodChange(
-                  'CASH',
-                )
-              }
-              disabled={
-                paymentStatus ===
-                'COLLECTED'
-              }
-            >
-              <View
-                style={
-                  styles.cashIcon
-                }
-              >
-                <Text
-                  style={
-                    styles.cashIconText
-                  }
-                >
-                  NPR
+              <View style={styles.customerInfo}>
+                <Text style={styles.customerName}>
+                  {delivery?.deliveryLocation?.name || delivery?.customer?.fullName || 'Customer'}
+                </Text>
+                <Text style={styles.customerAddress}>
+                  {delivery?.deliveryLocation?.formattedAddress ||
+                    delivery?.deliveryLocation?.address ||
+                    [delivery?.deliveryLocation?.locality, delivery?.deliveryLocation?.cityName || delivery?.deliveryLocation?.city]
+                      .filter(Boolean)
+                      .join(', ') || 'Delivery address unavailable'}
+                </Text>
+                <Text style={styles.customerOrder}>
+                  Order {deliveryId}
                 </Text>
               </View>
 
               <View
-                style={
-                  styles.paymentMethodContent
-                }
-              >
+                style={[
+                  styles.paymentStatusBadge,
+                  isPaymentComplete && styles.paymentStatusBadgePaid,
+                ]}>
                 <Text
-                  style={
-                    styles.paymentMethodTitle
-                  }
-                >
-                  Cash on Delivery
-                </Text>
-
-                <Text
-                  style={
-                    styles.paymentMethodSubtitle
-                  }
-                >
-                  Collect the cash amount directly
-                  from the customer.
+                  style={[
+                    styles.paymentStatusBadgeText,
+                    isPaymentComplete &&
+                      styles.paymentStatusBadgeTextPaid,
+                  ]}>
+                  {paymentStatusLabel}
                 </Text>
               </View>
-
-              {paymentMethod ===
-                'CASH' && (
-                <View
-                  style={
-                    styles.selectedCheck
-                  }
-                >
-                  <Text
-                    style={
-                      styles.selectedCheckText
-                    }
-                  >
-                    ✓
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-
-            {/* eSewa */}
-
-            <Pressable
-              style={[
-                styles.paymentMethodCard,
-                paymentMethod ===
-                  'ESEWA' &&
-                  styles.paymentMethodSelected,
-              ]}
-              onPress={() =>
-                handlePaymentMethodChange(
-                  'ESEWA',
-                )
-              }
-              disabled={
-                paymentStatus ===
-                'COLLECTED'
-              }
-            >
-              <View
-                style={
-                  styles.esewaIcon
-                }
-              >
-                <Text
-                  style={
-                    styles.esewaIconText
-                  }
-                >
-                  eS
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.paymentMethodContent
-                }
-              >
-                <Text
-                  style={
-                    styles.paymentMethodTitle
-                  }
-                >
-                  eSewa
-                </Text>
-
-                <Text
-                  style={
-                    styles.paymentMethodSubtitle
-                  }
-                >
-                  Customer pays using the eSewa
-                  digital wallet.
-                </Text>
-              </View>
-
-              {paymentMethod ===
-                'ESEWA' && (
-                <View
-                  style={
-                    styles.selectedCheck
-                  }
-                >
-                  <Text
-                    style={
-                      styles.selectedCheckText
-                    }
-                  >
-                    ✓
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-
-            {/* Khalti */}
-
-            <Pressable
-              style={[
-                styles.paymentMethodCard,
-                paymentMethod ===
-                  'KHALTI' &&
-                  styles.paymentMethodSelected,
-              ]}
-              onPress={() =>
-                handlePaymentMethodChange(
-                  'KHALTI',
-                )
-              }
-              disabled={
-                paymentStatus ===
-                'COLLECTED'
-              }
-            >
-              <View
-                style={
-                  styles.khaltiIcon
-                }
-              >
-                <Text
-                  style={
-                    styles.khaltiIconText
-                  }
-                >
-                  K
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.paymentMethodContent
-                }
-              >
-                <Text
-                  style={
-                    styles.paymentMethodTitle
-                  }
-                >
-                  Khalti
-                </Text>
-
-                <Text
-                  style={
-                    styles.paymentMethodSubtitle
-                  }
-                >
-                  Customer pays using the Khalti
-                  digital wallet.
-                </Text>
-              </View>
-
-              {paymentMethod ===
-                'KHALTI' && (
-                <View
-                  style={
-                    styles.selectedCheck
-                  }
-                >
-                  <Text
-                    style={
-                      styles.selectedCheckText
-                    }
-                  >
-                    ✓
-                  </Text>
-                </View>
-              )}
-            </Pressable>
+            </View>
           </View>
-
-          {/* Notes */}
 
           <View style={styles.card}>
-            <Text
-              style={styles.cardTitle}
-            >
-              COLLECTION NOTES
-            </Text>
+            <Text style={styles.sectionTitle}>Payment Summary</Text>
 
-            <Text
-              style={styles.fieldHint}
-            >
-              Optional note about the payment.
-            </Text>
+            <View style={styles.paymentSummaryBox}>
+              <View style={styles.summaryIconCircle}>
+                <Text style={styles.summaryIcon}>₹</Text>
+              </View>
 
-            <TextInput
-              value={notes}
-              onChangeText={setNotes}
-              multiline
-              numberOfLines={4}
-              placeholder="Example: Customer paid exact amount"
-              placeholderTextColor="#9CA3AF"
-              textAlignVertical="top"
-              style={styles.notesInput}
-              editable={
-                paymentStatus !==
-                'COLLECTED'
-              }
-            />
+              <View style={styles.summaryInfo}>
+                <Text style={styles.summaryLabel}>Payment Method</Text>
+                <Text style={styles.summaryValue}>
+                  {paymentMethodLabel}
+                </Text>
+              </View>
+
+              <View style={styles.summaryDivider} />
+
+              <View style={styles.summaryInfoRight}>
+                <Text style={styles.summaryLabel}>Order Amount</Text>
+                <Text style={styles.summaryAmount}>
+                  NPR {paymentConfig.amount}
+                </Text>
+              </View>
+            </View>
+
+            {isLoadingOrder && (
+              <Text style={styles.sectionSubtitle}>Loading payment details from DailyMart…</Text>
+            )}
+            {!isLoadingOrder && !delivery && (
+              <Text style={styles.validationError}>Order details are unavailable. Go back and reopen this assigned delivery.</Text>
+            )}
+
+            {isOnlinePayment && (
+              <View style={styles.onlinePaymentNotice}>
+                <View style={styles.onlineNoticeIcon}>
+                  <Text style={styles.onlineNoticeIconText}>!</Text>
+                </View>
+
+                <View style={styles.onlineNoticeContent}>
+                  <Text style={styles.onlineNoticeTitle}>
+                    Online payment order
+                  </Text>
+                  <Text style={styles.onlineNoticeText}>
+                    Do not collect cash. This status is the payment state recorded by DailyMart.
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
 
-          {/* Payment Status */}
+          {isCOD && paymentStatus === 'PENDING' && (
+            <>
+              <View style={styles.card}>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <Text style={styles.sectionTitle}>
+                      Amount to Collect
+                    </Text>
+                    <Text style={styles.sectionSubtitle}>
+                      Enter the amount received from the customer.
+                    </Text>
+                  </View>
+
+                  <View style={styles.codAmountBadge}>
+                    <Text style={styles.codAmountBadgeText}>COD</Text>
+                  </View>
+                </View>
+
+                <View style={styles.expectedAmountBox}>
+                  <Text style={styles.expectedAmountLabel}>
+                    EXPECTED AMOUNT
+                  </Text>
+                  <Text style={styles.expectedAmount}>
+                    NPR {paymentConfig.amount}
+                  </Text>
+                </View>
+
+                <Text style={styles.inputLabel}>Collected Amount</Text>
+
+                <View
+                  style={[
+                    styles.amountInputContainer,
+                    amountError !== '' && styles.amountInputInvalid,
+                    amountMatches && styles.amountInputValid,
+                  ]}>
+                  <Text style={styles.currencyText}>NPR</Text>
+                  <TextInput
+                    value={collectedAmount}
+                    onChangeText={handleAmountChange}
+                    onBlur={() => setAmountTouched(true)}
+                    keyboardType="number-pad"
+                    placeholder="Enter collected amount"
+                    placeholderTextColor="#9BA39E"
+                    style={styles.amountInput}
+                    editable={!isProcessing}
+                    maxLength={7}
+                    accessibilityLabel="Collected amount in Nepalese rupees"
+                  />
+                </View>
+
+                {amountError !== '' && (
+                  <Text style={styles.validationError}>
+                    {amountError}
+                  </Text>
+                )}
+
+                {remainingAmount > 0 && (
+                  <View style={styles.remainingBox}>
+                    <Text style={styles.remainingLabel}>
+                      Remaining Amount
+                    </Text>
+                    <Text style={styles.remainingValue}>
+                      NPR {remainingAmount}
+                    </Text>
+                  </View>
+                )}
+
+                {changeAmount > 0 && (
+                  <View style={styles.changeBox}>
+                    <Text style={styles.changeLabel}>
+                      Change to Customer
+                    </Text>
+                    <Text style={styles.changeValue}>
+                      NPR {changeAmount}
+                    </Text>
+                  </View>
+                )}
+
+                {amountMatches && (
+                  <View style={styles.amountSuccessBox}>
+                    <View style={styles.successCircle}>
+                      <Text style={styles.successCircleText}>✓</Text>
+                    </View>
+                    <View style={styles.amountSuccessContent}>
+                      <Text style={styles.amountSuccessTitle}>
+                        Exact Amount
+                      </Text>
+                      <Text style={styles.amountSuccessText}>
+                        NPR {paymentConfig.amount} matches the order amount.
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Collection Method</Text>
+
+                <View style={styles.cashMethodCard}>
+                  <View style={styles.cashIcon}>
+                    <Text style={styles.cashIconText}>NPR</Text>
+                  </View>
+
+                  <View style={styles.cashMethodContent}>
+                    <Text style={styles.cashMethodTitle}>
+                      Cash on Delivery
+                    </Text>
+                    <Text style={styles.cashMethodText}>
+                      Collect cash directly from the customer.
+                    </Text>
+                  </View>
+
+                  <View style={styles.selectedCheck}>
+                    <Text style={styles.selectedCheckText}>✓</Text>
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
+
+          {isOnlinePayment && paymentStatus === 'PAID' && (
+            <View style={styles.paidOnlineCard}>
+              <View style={styles.paidHeroCircle}>
+                <Text style={styles.paidHeroCheck}>✓</Text>
+              </View>
+
+              <Text style={styles.paidOnlineTitle}>
+                Payment recorded as paid
+              </Text>
+              <Text style={styles.paidOnlineSubtitle}>
+                DailyMart has recorded this order as paid online. Do not collect cash.
+              </Text>
+
+              <View style={styles.paidDetailsCard}>
+                <View style={styles.paidDetailRow}>
+                  <Text style={styles.paidDetailLabel}>Payment Method</Text>
+                  <Text style={styles.paidDetailValue}>
+                    {paymentMethodLabel}
+                  </Text>
+                </View>
+
+                <View style={styles.paidDetailRow}>
+                  <Text style={styles.paidDetailLabel}>Amount</Text>
+                  <Text style={styles.paidAmount}>
+                    NPR {paymentConfig.amount}
+                  </Text>
+                </View>
+
+                <View style={styles.paidDetailRowLast}>
+                  <Text style={styles.paidDetailLabel}>
+                    Cash Collection Required
+                  </Text>
+                  <Text style={styles.noCollectionText}>No</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {isOnlinePayment && paymentStatus === 'PENDING' && (
+            <View style={styles.onlinePendingCard}>
+              <View style={styles.onlinePendingHeader}>
+                <View style={styles.onlinePendingIcon}>
+                  <Text style={styles.onlinePendingIconText}>
+                    {paymentConfig.method === 'ESEWA' ? 'eS' : 'K'}
+                  </Text>
+                </View>
+
+                <View style={styles.onlinePendingHeaderText}>
+                  <Text style={styles.onlinePendingTitle}>
+                    {paymentMethodLabel} Payment Pending
+                  </Text>
+                  <Text style={styles.onlinePendingSubtitle}>
+                    Wait for DailyMart to record the payment as paid before continuing.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.gatewayVerificationBox}>
+                <Text style={styles.gatewayIcon}>▦</Text>
+                <Text style={styles.gatewayTitle}>
+                  Payment status
+                </Text>
+                <Text style={styles.gatewayText}>
+                  Refresh the order from DailyMart to check whether its payment status has changed.
+                </Text>
+              </View>
+
+              <Pressable
+                style={[
+                  styles.primaryButton,
+                  isProcessing && styles.primaryButtonDisabled,
+                ]}
+                onPress={handleVerifyOnlinePayment}
+                disabled={isProcessing}>
+                <Text style={styles.primaryButtonText}>
+                  {isProcessing
+                    ? 'REFRESHING...'
+                    : 'REFRESH PAYMENT STATUS'}
+                </Text>
+                {!isProcessing && (
+                  <Text style={styles.primaryButtonArrow}>→</Text>
+                )}
+              </Pressable>
+            </View>
+          )}
 
           <View
             style={[
               styles.statusCard,
-              paymentStatus ===
-                'COLLECTED' &&
-                styles.statusCardSuccess,
-            ]}
-          >
+              isPaymentComplete && styles.statusCardSuccess,
+            ]}>
             <View
               style={[
                 styles.statusIcon,
-                paymentStatus ===
-                  'COLLECTED' &&
-                  styles.statusIconSuccess,
-              ]}
-            >
+                isPaymentComplete && styles.statusIconSuccess,
+              ]}>
               <Text
-                style={
-                  styles.statusIconText
-                }
-              >
-                {paymentStatus ===
-                'COLLECTED'
-                  ? '✓'
-                  : '₹'}
+                style={[
+                  styles.statusIconText,
+                  isPaymentComplete && styles.statusIconTextSuccess,
+                ]}>
+                {isPaymentComplete ? '✓' : '₹'}
               </Text>
             </View>
 
-            <View
-              style={
-                styles.statusContent
-              }
-            >
-              <Text
-                style={
-                  styles.statusTitle
-                }
-              >
-                {paymentStatus ===
-                'COLLECTED'
-                  ? 'Payment collected'
-                  : 'Payment pending'}
+            <View style={styles.statusContent}>
+              <Text style={styles.statusTitle}>
+                {paymentStatus === 'PAID'
+                  ? isOnlinePayment ? 'Paid Online' : 'Paid'
+                  : paymentStatus === 'COLLECTED'
+                    ? 'Cash collection recorded'
+                    : 'Payment Pending'}
               </Text>
 
-              <Text
-                style={
-                  styles.statusDescription
-                }
-              >
-                {paymentStatus ===
-                'COLLECTED'
-                  ? `NPR ${EXPECTED_AMOUNT} has been recorded through ${getPaymentMethodName()}.`
-                  : `Confirm the payment after receiving the customer payment through ${getPaymentMethodName()}.`}
+              <Text style={styles.statusDescription}>
+                {paymentStatus === 'PAID'
+                ? `DailyMart has recorded NPR ${paymentConfig.amount} as paid.`
+                  : paymentStatus === 'COLLECTED'
+                    ? `NPR ${paymentConfig.amount} was recorded as collected.`
+                    : isOnlinePayment
+                      ? `Do not collect cash. The ${paymentMethodLabel} payment needs backend verification.`
+                      : `Collect exactly NPR ${paymentConfig.amount} before continuing.`}
               </Text>
             </View>
           </View>
 
-          {/* Main Action */}
-
-          {paymentStatus ===
-          'COLLECTED' ? (
+          {isPaymentComplete ? (
             <Pressable
-              style={
-                styles.primaryButton
-              }
-              onPress={
-                handleContinue
-              }
-            >
-              <Text
-                style={
-                  styles.primaryButtonText
-                }
-              >
+              style={styles.primaryButton}
+              onPress={handleContinue}>
+              <Text style={styles.primaryButtonText}>
                 CONTINUE TO DELIVERY COMPLETION
               </Text>
+              <Text style={styles.primaryButtonArrow}>→</Text>
             </Pressable>
-          ) : (
+          ) : isCOD ? (
             <Pressable
               style={[
                 styles.primaryButton,
-                isProcessing &&
-                  styles.primaryButtonProcessing,
+                (!amountMatches || isProcessing) &&
+                  styles.primaryButtonDisabled,
               ]}
-              onPress={
-                handleCollectPayment
-              }
-              disabled={isProcessing}
-            >
-              <Text
-                style={
-                  styles.primaryButtonText
-                }
-              >
+              onPress={handleConfirmCash}
+              disabled={!amountMatches || isProcessing || isLoadingOrder || !delivery}>
+              <Text style={styles.primaryButtonText}>
                 {isProcessing
                   ? 'PROCESSING...'
-                  : 'CONFIRM PAYMENT COLLECTION'}
+                  : 'CONFIRM CASH COLLECTION'}
               </Text>
+              {!isProcessing && (
+                <Text style={styles.primaryButtonArrow}>→</Text>
+              )}
             </Pressable>
-          )}
+          ) : null}
 
-          {/* Payment Issue */}
-
-          {paymentStatus !==
-            'COLLECTED' && (
+          {paymentStatus === 'PENDING' && (
             <Pressable
-              style={
-                styles.secondaryAction
-              }
-              onPress={
-                handlePaymentIssue
-              }
-            >
-              <Text
-                style={
-                  styles.secondaryActionText
-                }
-              >
+              style={styles.secondaryButton}
+              onPress={handlePaymentIssue}
+              disabled={isProcessing}>
+              <Text style={styles.secondaryButtonText}>
                 PAYMENT ISSUE
               </Text>
             </Pressable>
           )}
 
-          {/* Security */}
+          <View style={styles.securityCard}>
+            <View style={styles.securityIcon}>
+              <Text style={styles.securityIconText}>!</Text>
+            </View>
 
-          <View
-            style={
-              styles.securityCard
-            }
-          >
-            <Text
-              style={
-                styles.securityTitle
-              }
-            >
-              PAYMENT SECURITY
-            </Text>
-
-            <Text
-              style={
-                styles.securityText
-              }
-            >
-              Verify the payment carefully before
-              confirming collection. In the production
-              version, cash, eSewa and Khalti payments
-              will be validated and recorded by the
-              backend.
-            </Text>
+            <View style={styles.securityContent}>
+              <Text style={styles.securityTitle}>Payment Security</Text>
+              <Text style={styles.securityText}>
+                The rider cannot change an order's payment method. Online
+                payment status must be verified by the backend. Cash
+                collection applies only to COD orders. The payment data
+                shown on this screen comes from the assigned order in DailyMart.
+              </Text>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* Payment Confirmation Modal */}
 
       <Modal
         visible={showConfirmModal}
         transparent
         animationType="fade"
-        onRequestClose={
-          handleCancelCollection
-        }
-      >
-        <View
-          style={
-            styles.modalBackdrop
-          }
-        >
-          <View
-            style={
-              styles.confirmModal
-            }
-          >
-            <View
-              style={
-                styles.confirmIcon
-              }
-            >
-              <Text
-                style={
-                  styles.confirmIconText
-                }
-              >
-                NPR
-              </Text>
+        onRequestClose={handleCloseConfirmModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.confirmModal}>
+            <View style={styles.confirmIcon}>
+              <Text style={styles.confirmIconText}>NPR</Text>
             </View>
 
-            <Text
-              style={
-                styles.confirmTitle
-              }
-            >
-              Confirm Payment Collection
+            <Text style={styles.confirmTitle}>
+              Confirm Cash Collection
             </Text>
 
-            <Text
-              style={
-                styles.confirmDescription
-              }
-            >
-              Please confirm that you have received
-              the complete payment from the customer.
+            <Text style={styles.confirmDescription}>
+              Confirm that you received the exact payment amount from
+              the customer. DailyMart will record this collection against the order.
             </Text>
 
-            <View
-              style={
-                styles.confirmAmountBox
-              }
-            >
-              <Text
-                style={
-                  styles.confirmAmountLabel
-                }
-              >
-                Amount collected
+            <View style={styles.confirmAmountBox}>
+              <Text style={styles.confirmAmountLabel}>
+                CASH TO MARK AS RECEIVED
               </Text>
-
-              <Text
-                style={
-                  styles.confirmAmount
-                }
-              >
-                NPR {EXPECTED_AMOUNT}
+              <Text style={styles.confirmAmount}>
+                NPR {paymentConfig.amount}
               </Text>
-
-              <Text
-                style={
-                  styles.confirmMethod
-                }
-              >
-                Payment method: {getPaymentMethodName()}
+              <Text style={styles.confirmMethod}>
+                Cash on Delivery
               </Text>
             </View>
 
             <Pressable
-              style={
-                styles.confirmButton
-              }
-              onPress={
-                handleConfirmCollection
-              }
-              disabled={isProcessing}
-            >
-              <Text
-                style={
-                  styles.confirmButtonText
-                }
-              >
-                {isProcessing
-                  ? 'PROCESSING...'
-                  : 'CONFIRM COLLECTION'}
+              style={[
+                styles.confirmButton,
+                isProcessing && styles.primaryButtonDisabled,
+              ]}
+              onPress={handleConfirmCashCollection}
+              disabled={isProcessing}>
+              <Text style={styles.confirmButtonText}>
+                {isProcessing ? 'PROCESSING...' : 'CONFIRM COLLECTION'}
               </Text>
             </Pressable>
 
             <Pressable
-              style={
-                styles.cancelButton
-              }
-              onPress={
-                handleCancelCollection
-              }
-              disabled={isProcessing}
-            >
-              <Text
-                style={
-                  styles.cancelButtonText
-                }
-              >
-                CANCEL
-              </Text>
+              style={styles.cancelButton}
+              onPress={handleCloseConfirmModal}
+              disabled={isProcessing}>
+              <Text style={styles.cancelButtonText}>CANCEL</Text>
             </Pressable>
           </View>
         </View>
@@ -1074,607 +817,876 @@ function CODCollectionScreen({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F7F8FA',
+    backgroundColor: '#F7FAF8',
   },
-
   flex: {
     flex: 1,
   },
-
   content: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 36,
+    paddingTop: 7,
+    paddingBottom: 32,
   },
-
   header: {
+    height: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 18,
+    marginBottom: 8,
   },
-
-  headerIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: '#E8F7ED',
+  backButton: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
-
-  headerIconText: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#1E8E4A',
+  backArrow: {
+    fontSize: 35,
+    lineHeight: 33,
+    color: '#202729',
   },
-
-  headerTextContainer: {
+  headerCenter: {
     flex: 1,
+    alignItems: 'center',
   },
-
-  title: {
-    fontSize: 24,
+  headerTitle: {
+    fontSize: 19,
     fontWeight: '800',
-    color: '#111827',
+    color: '#151C1E',
   },
-
-  subtitle: {
-    fontSize: 13,
-    lineHeight: 19,
-    color: '#6B7280',
-    marginTop: 3,
+  headerSubtitle: {
+    marginTop: 2,
+    fontSize: 9.5,
+    color: '#7A8385',
   },
-
-  card: {
+  headerSpacer: {
+    width: 40,
+  },
+  progressCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E8EAED',
-  },
-
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  cardTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    color: '#374151',
-  },
-
-  codBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    backgroundColor: '#FFF7E6',
-  },
-
-  codBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#B7791F',
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: '#EEF0F2',
-    marginVertical: 14,
-  },
-
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    borderColor: '#E5EBE7',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     marginBottom: 10,
   },
-
-  infoLabel: {
-    fontSize: 13,
-    color: '#6B7280',
+  progressTrack: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-
-  infoValue: {
+  progressStep: {
     flex: 1,
-    marginLeft: 18,
-    textAlign: 'right',
-    fontSize: 13,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 2,
+  },
+  progressStepDone: {
+    backgroundColor: '#0A9A49',
+  },
+  progressStepActive: {
+    backgroundColor: '#7BC995',
+  },
+  progressStepPending: {
+    backgroundColor: '#DFE5E0',
+  },
+  progressLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 5,
+  },
+  progressLabel: {
+    width: '33.33%',
+    textAlign: 'center',
+    fontSize: 8.5,
+    color: '#7C8580',
+  },
+  progressLabelActive: {
+    color: '#078D46',
+    fontWeight: '800',
+  },
+  progressLabelDone: {
+    color: '#078D46',
     fontWeight: '700',
-    color: '#111827',
   },
-
-  pendingText: {
-    color: '#D97706',
-  },
-
-  collectedText: {
-    color: '#1E8E4A',
-  },
-
-  expectedAmountBox: {
-    alignItems: 'center',
-    padding: 16,
-    marginTop: 14,
-    borderRadius: 14,
-    backgroundColor: '#F8FAF9',
-  },
-
-  expectedAmountLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 5,
-  },
-
-  expectedAmount: {
-    fontSize: 30,
-    fontWeight: '900',
-    color: '#111827',
-  },
-
-  amountInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    paddingHorizontal: 14,
-    borderWidth: 1.5,
-    borderColor: '#D9DEE3',
-    borderRadius: 13,
+  card: {
     backgroundColor: '#FFFFFF',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#E5EBE7',
+    padding: 13,
+    marginBottom: 10,
   },
-
-  currencyText: {
-    fontSize: 14,
+  customerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  customerAvatar: {
+    width: 47,
+    height: 47,
+    borderRadius: 24,
+    backgroundColor: '#F0E4D4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    marginRight: 9,
+  },
+  customerAvatarText: {
+    fontSize: 18,
     fontWeight: '800',
-    color: '#1E8E4A',
-    marginRight: 10,
+    color: '#5E4A38',
   },
-
-  amountInput: {
+  customerOnlineDot: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: '#1CAF50',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  customerInfo: {
     flex: 1,
-    minHeight: 52,
-    fontSize: 21,
-    fontWeight: '800',
-    color: '#111827',
   },
-
-  remainingBox: {
+  customerName: {
+    fontSize: 14.5,
+    fontWeight: '800',
+    color: '#202729',
+  },
+  customerAddress: {
+    marginTop: 3,
+    fontSize: 10,
+    color: '#70797D',
+  },
+  customerOrder: {
+    marginTop: 2,
+    fontSize: 9,
+    color: '#899093',
+  },
+  paymentStatusBadge: {
+    minHeight: 29,
+    paddingHorizontal: 9,
+    borderRadius: 7,
+    backgroundColor: '#FFF5DE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentStatusBadgePaid: {
+    backgroundColor: '#DFF6E5',
+  },
+  paymentStatusBadgeText: {
+    fontSize: 8.5,
+    fontWeight: '800',
+    color: '#956500',
+  },
+  paymentStatusBadgeTextPaid: {
+    color: '#078E46',
+  },
+  sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#FFF7E6',
   },
-
-  remainingLabel: {
-    fontSize: 12,
-    color: '#8A5A00',
-  },
-
-  remainingValue: {
-    fontSize: 12,
+  sectionTitle: {
+    fontSize: 15,
     fontWeight: '800',
-    color: '#B7791F',
+    color: '#202729',
   },
-
-  changeBox: {
+  sectionSubtitle: {
+    marginTop: 3,
+    maxWidth: 300,
+    fontSize: 9.5,
+    lineHeight: 14,
+    color: '#7A8386',
+  },
+  paymentSummaryBox: {
+    minHeight: 72,
+    marginTop: 10,
+    borderRadius: 11,
+    backgroundColor: '#F6FAF7',
+    borderWidth: 1,
+    borderColor: '#E0E8E2',
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#EEF6FF',
   },
-
-  changeLabel: {
-    fontSize: 12,
-    color: '#245A91',
+  summaryIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#E4F6E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
   },
-
-  changeValue: {
-    fontSize: 12,
+  summaryIcon: {
+    fontSize: 19,
+    fontWeight: '900',
+    color: '#078E46',
+  },
+  summaryInfo: {
+    flex: 1,
+  },
+  summaryInfoRight: {
+    minWidth: 105,
+  },
+  summaryLabel: {
+    fontSize: 8.5,
+    color: '#79827E',
+  },
+  summaryValue: {
+    marginTop: 2,
+    fontSize: 12.5,
     fontWeight: '800',
-    color: '#245A91',
+    color: '#273032',
   },
-
-  amountSuccessBox: {
+  summaryAmount: {
+    marginTop: 2,
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#078E46',
+  },
+  summaryDivider: {
+    width: 1,
+    height: 42,
+    backgroundColor: '#E1E7E3',
+    marginHorizontal: 10,
+  },
+  onlinePaymentNotice: {
+    marginTop: 9,
+    minHeight: 54,
+    borderRadius: 10,
+    backgroundColor: '#EAF8EE',
+    borderWidth: 1,
+    borderColor: '#C9E7D1',
+    padding: 9,
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#EAF8EF',
   },
-
-  successCircle: {
+  onlineNoticeIcon: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#1E8E4A',
+    backgroundColor: '#0A9A49',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
-  },
-
-  successCircleText: {
-    fontSize: 17,
-    fontWeight: '900',
-    color: '#FFFFFF',
-  },
-
-  amountSuccessContent: {
-    flex: 1,
-  },
-
-  amountSuccessTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#166534',
-  },
-
-  amountSuccessText: {
-    marginTop: 2,
-    fontSize: 11,
-    lineHeight: 16,
-    color: '#3F6F50',
-  },
-
-  paymentMethodCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    padding: 14,
-    borderRadius: 13,
-    borderWidth: 1.3,
-    borderColor: '#E0E4E8',
-    backgroundColor: '#FFFFFF',
-  },
-
-  paymentMethodSelected: {
-    borderWidth: 1.5,
-    borderColor: '#1E8E4A',
-    backgroundColor: '#F2FBF5',
-  },
-
-  paymentMethodContent: {
-    flex: 1,
-    marginLeft: 11,
     marginRight: 8,
   },
-
-  paymentMethodTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#166534',
-  },
-
-  paymentMethodSubtitle: {
-    fontSize: 11,
-    lineHeight: 16,
-    color: '#64746A',
-    marginTop: 3,
-  },
-
-  cashIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#E0F2E5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  cashIconText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#1E8E4A',
-  },
-
-  esewaIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#DFF5E7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  esewaIconText: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#36B54A',
-  },
-
-  khaltiIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#EFE8FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  khaltiIconText: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#5D2CA8',
-  },
-
-  selectedCheck: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#1E8E4A',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  selectedCheckText: {
+  onlineNoticeIconText: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '900',
   },
-
-  fieldHint: {
-    fontSize: 11,
-    color: '#7A818A',
-    marginTop: 5,
-    marginBottom: 10,
+  onlineNoticeContent: {
+    flex: 1,
   },
-
-  notesInput: {
-    minHeight: 95,
+  onlineNoticeTitle: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#245331',
+  },
+  onlineNoticeText: {
+    marginTop: 2,
+    fontSize: 8.8,
+    lineHeight: 13,
+    color: '#67746B',
+  },
+  codAmountBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 7,
+    backgroundColor: '#E4F6E9',
+  },
+  codAmountBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#078E46',
+  },
+  expectedAmountBox: {
+    marginTop: 12,
+    padding: 13,
+    borderRadius: 11,
+    backgroundColor: '#F0F9F2',
     borderWidth: 1,
-    borderColor: '#D9DEE3',
-    borderRadius: 12,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    fontSize: 13,
-    color: '#111827',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#D3EBDD',
+    alignItems: 'center',
   },
-
-  statusCard: {
+  expectedAmountLabel: {
+    fontSize: 8.5,
+    fontWeight: '800',
+    color: '#79847D',
+  },
+  expectedAmount: {
+    marginTop: 4,
+    fontSize: 25,
+    fontWeight: '900',
+    color: '#078E46',
+  },
+  inputLabel: {
+    marginTop: 13,
+    marginBottom: 6,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#35403A',
+  },
+  amountInputContainer: {
+    minHeight: 51,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5CE',
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 15,
-    borderRadius: 15,
-    backgroundColor: '#FFF9EC',
+    paddingHorizontal: 12,
+  },
+  amountInputInvalid: {
+    borderColor: '#D94B4B',
+  },
+  amountInputValid: {
+    borderColor: '#79C98A',
+  },
+  currencyText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#078E46',
+    marginRight: 10,
+  },
+  amountInput: {
+    flex: 1,
+    minHeight: 48,
+    paddingVertical: 8,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#273032',
+  },
+  validationError: {
+    marginTop: 5,
+    fontSize: 9.5,
+    lineHeight: 14,
+    color: '#C83D3D',
+  },
+  remainingBox: {
+    marginTop: 9,
+    padding: 10,
+    borderRadius: 9,
+    backgroundColor: '#FFF5DE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  remainingLabel: {
+    fontSize: 10,
+    color: '#85611B',
+  },
+  remainingValue: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#85611B',
+  },
+  changeBox: {
+    marginTop: 9,
+    padding: 10,
+    borderRadius: 9,
+    backgroundColor: '#EAF8EE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  changeLabel: {
+    fontSize: 10,
+    color: '#28623A',
+  },
+  changeValue: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#078E46',
+  },
+  amountSuccessBox: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: '#EAF8EE',
     borderWidth: 1,
-    borderColor: '#F4E2AE',
-    marginBottom: 14,
+    borderColor: '#C9E7D1',
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-
-  statusCardSuccess: {
-    backgroundColor: '#EAF8EF',
-    borderColor: '#B9E4C7',
-  },
-
-  statusIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+  successCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#0A9A49',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F7DFA8',
-    marginRight: 12,
+    marginRight: 8,
   },
-
-  statusIconSuccess: {
-    backgroundColor: '#1E8E4A',
-  },
-
-  statusIconText: {
-    fontSize: 19,
+  successCircleText: {
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: '900',
-    color: '#7A5200',
   },
-
+  amountSuccessContent: {
+    flex: 1,
+  },
+  amountSuccessTitle: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#245331',
+  },
+  amountSuccessText: {
+    marginTop: 2,
+    fontSize: 9,
+    lineHeight: 13,
+    color: '#67746B',
+  },
+  cashMethodCard: {
+    minHeight: 67,
+    marginTop: 10,
+    borderRadius: 11,
+    backgroundColor: '#F6FAF7',
+    borderWidth: 1,
+    borderColor: '#E0E8E2',
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cashIcon: {
+    width: 39,
+    height: 39,
+    borderRadius: 20,
+    backgroundColor: '#E4F6E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 9,
+  },
+  cashIconText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#078E46',
+  },
+  cashMethodContent: {
+    flex: 1,
+  },
+  cashMethodTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#273032',
+  },
+  cashMethodText: {
+    marginTop: 3,
+    fontSize: 9,
+    lineHeight: 13,
+    color: '#75807A',
+  },
+  selectedCheck: {
+    width: 23,
+    height: 23,
+    borderRadius: 12,
+    backgroundColor: '#0A9A49',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedCheckText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  paidOnlineCard: {
+    alignItems: 'center',
+    backgroundColor: '#EAF8ED',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#C6E7CE',
+    padding: 15,
+    marginBottom: 10,
+  },
+  paidHeroCircle: {
+    width: 61,
+    height: 61,
+    borderRadius: 31,
+    backgroundColor: '#0A9A49',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paidHeroCheck: {
+    fontSize: 31,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  paidOnlineTitle: {
+    marginTop: 10,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1C3825',
+    textAlign: 'center',
+  },
+  paidOnlineSubtitle: {
+    marginTop: 5,
+    fontSize: 10,
+    lineHeight: 15,
+    color: '#65716A',
+    textAlign: 'center',
+  },
+  paidDetailsCard: {
+    width: '100%',
+    marginTop: 12,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E8E2',
+    paddingHorizontal: 10,
+  },
+  paidDetailRow: {
+    minHeight: 39,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDF1EE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  paidDetailRowLast: {
+    minHeight: 39,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  paidDetailLabel: {
+    fontSize: 9.5,
+    color: '#7A8580',
+    flexShrink: 1,
+  },
+  paidDetailValue: {
+    marginLeft: 8,
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#394144',
+  },
+  paidAmount: {
+    marginLeft: 8,
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#078E46',
+  },
+  paidTransaction: {
+    maxWidth: '55%',
+    marginLeft: 8,
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#394144',
+  },
+  noCollectionText: {
+    marginLeft: 8,
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#078E46',
+  },
+  onlinePendingCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#E5EBE7',
+    padding: 13,
+    marginBottom: 10,
+  },
+  onlinePendingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  onlinePendingIcon: {
+    width: 43,
+    height: 43,
+    borderRadius: 22,
+    backgroundColor: '#E5F6EA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 9,
+  },
+  onlinePendingIconText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#078E46',
+  },
+  onlinePendingHeaderText: {
+    flex: 1,
+  },
+  onlinePendingTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#273032',
+  },
+  onlinePendingSubtitle: {
+    marginTop: 3,
+    fontSize: 9.5,
+    lineHeight: 14,
+    color: '#75807A',
+  },
+  gatewayVerificationBox: {
+    marginTop: 12,
+    borderRadius: 10,
+    backgroundColor: '#F6FAF7',
+    borderWidth: 1,
+    borderColor: '#E0E8E2',
+    padding: 11,
+    alignItems: 'center',
+  },
+  gatewayIcon: {
+    fontSize: 22,
+    color: '#078E46',
+  },
+  gatewayTitle: {
+    marginTop: 4,
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#273032',
+  },
+  gatewayText: {
+    marginTop: 4,
+    fontSize: 9.5,
+    lineHeight: 14,
+    color: '#75807A',
+    textAlign: 'center',
+  },
+  notesInput: {
+    minHeight: 95,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5CE',
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    fontSize: 11,
+    lineHeight: 17,
+    color: '#273032',
+  },
+  notesCounter: {
+    marginTop: 4,
+    fontSize: 9,
+    color: '#8A938E',
+    textAlign: 'right',
+  },
+  statusCard: {
+    minHeight: 78,
+    borderRadius: 13,
+    backgroundColor: '#FFF7E6',
+    borderWidth: 1,
+    borderColor: '#F0E1B9',
+    padding: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  statusCardSuccess: {
+    backgroundColor: '#EAF8EE',
+    borderColor: '#C9E7D1',
+  },
+  statusIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F5E6BD',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 9,
+  },
+  statusIconSuccess: {
+    backgroundColor: '#0A9A49',
+  },
+  statusIconText: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#946A13',
+  },
+  statusIconTextSuccess: {
+    color: '#FFFFFF',
+  },
   statusContent: {
     flex: 1,
   },
-
   statusTitle: {
-    fontSize: 14,
+    fontSize: 11.5,
     fontWeight: '800',
-    color: '#111827',
+    color: '#273032',
   },
-
   statusDescription: {
-    fontSize: 11,
-    lineHeight: 17,
-    color: '#68717B',
     marginTop: 3,
+    fontSize: 9.5,
+    lineHeight: 14,
+    color: '#707B74',
   },
-
   primaryButton: {
-    minHeight: 54,
-    borderRadius: 14,
-    backgroundColor: '#1E8E4A',
+    minHeight: 50,
+    borderRadius: 11,
+    backgroundColor: '#079A49',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 10,
-    elevation: 2,
-    shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 5,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    marginBottom: 9,
+    paddingHorizontal: 12,
   },
-
-  primaryButtonProcessing: {
-    opacity: 0.65,
+  primaryButtonDisabled: {
+    backgroundColor: '#AAB5AD',
   },
-
   primaryButtonText: {
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0.35,
+    fontSize: 11.5,
+    fontWeight: '800',
     color: '#FFFFFF',
     textAlign: 'center',
+    flexShrink: 1,
   },
-
-  secondaryAction: {
-    minHeight: 50,
-    borderRadius: 14,
+  primaryButtonArrow: {
+    marginLeft: 8,
+    fontSize: 21,
+    color: '#FFFFFF',
+  },
+  secondaryButton: {
+    minHeight: 46,
+    borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#D8DEE3',
+    borderColor: '#D0D8D2',
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
+    marginBottom: 9,
   },
-
-  secondaryActionText: {
-    fontSize: 12,
+  secondaryButtonText: {
+    fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.3,
-    color: '#B42318',
+    color: '#626B66',
   },
-
   securityCard: {
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: '#F0F4F8',
+    minHeight: 72,
+    borderRadius: 13,
+    backgroundColor: '#F1F5F7',
     borderWidth: 1,
-    borderColor: '#E0E6EB',
+    borderColor: '#DFE7EB',
+    padding: 11,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
   },
-
-  securityTitle: {
-    fontSize: 11,
+  securityIcon: {
+    width: 29,
+    height: 29,
+    borderRadius: 15,
+    backgroundColor: '#DDE6EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  securityIconText: {
+    fontSize: 14,
     fontWeight: '900',
-    letterSpacing: 0.4,
-    color: '#4B5563',
-    marginBottom: 5,
+    color: '#5B6D79',
   },
-
+  securityContent: {
+    flex: 1,
+  },
+  securityTitle: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#43545E',
+  },
   securityText: {
-    fontSize: 11,
-    lineHeight: 17,
-    color: '#6B7280',
+    marginTop: 3,
+    fontSize: 8.5,
+    lineHeight: 14,
+    color: '#73818A',
   },
-
-  /* Confirmation Modal */
-
   modalBackdrop: {
     flex: 1,
-    backgroundColor:
-      'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 22,
+    paddingHorizontal: 20,
   },
-
   confirmModal: {
     width: '100%',
-    maxWidth: 420,
-    borderRadius: 20,
+    maxWidth: 390,
+    borderRadius: 19,
     backgroundColor: '#FFFFFF',
-    padding: 22,
+    padding: 19,
   },
-
   confirmIcon: {
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: '#E8F7ED',
+    backgroundColor: '#EAF8EE',
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
-    marginBottom: 14,
+    marginBottom: 11,
   },
-
   confirmIconText: {
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: '900',
-    color: '#1E8E4A',
+    color: '#078E46',
   },
-
   confirmTitle: {
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: '#182022',
     textAlign: 'center',
   },
-
   confirmDescription: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: '#6B7280',
+    marginTop: 6,
+    fontSize: 10.5,
+    lineHeight: 16,
+    color: '#737D80',
     textAlign: 'center',
-    marginTop: 8,
   },
-
   confirmAmountBox: {
-    marginTop: 18,
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: '#F5FAF6',
+    marginTop: 13,
+    borderRadius: 11,
+    backgroundColor: '#F0F9F2',
     borderWidth: 1,
-    borderColor: '#D7EBDC',
+    borderColor: '#D3EBDD',
+    padding: 12,
     alignItems: 'center',
   },
-
   confirmAmountLabel: {
-    fontSize: 11,
-    color: '#6B7280',
+    fontSize: 8.5,
+    fontWeight: '700',
+    color: '#79847D',
   },
-
   confirmAmount: {
-    fontSize: 27,
+    marginTop: 3,
+    fontSize: 26,
     fontWeight: '900',
-    color: '#1E8E4A',
-    marginTop: 4,
+    color: '#078E46',
   },
-
   confirmMethod: {
-    fontSize: 11,
-    color: '#6B7280',
-    marginTop: 5,
+    marginTop: 3,
+    fontSize: 9.5,
+    color: '#6D7872',
   },
-
   confirmButton: {
-    minHeight: 52,
-    borderRadius: 13,
-    backgroundColor: '#1E8E4A',
+    minHeight: 50,
+    borderRadius: 11,
+    backgroundColor: '#079A49',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 18,
+    marginTop: 14,
   },
-
   confirmButtonText: {
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0.3,
+    fontSize: 11.5,
+    fontWeight: '800',
     color: '#FFFFFF',
   },
-
   cancelButton: {
-    minHeight: 50,
-    borderRadius: 13,
+    minHeight: 46,
+    borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#D8DEE3',
+    borderColor: '#D0D8D2',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
-
   cancelButtonText: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '800',
-    color: '#59616B',
+    color: '#626B66',
   },
 });
 

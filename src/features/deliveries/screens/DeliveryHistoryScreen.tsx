@@ -1,14 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, {useCallback, useMemo, useState} from 'react';
+import {Alert, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import {useFocusEffect} from '@react-navigation/native';
+import {FontAwesomeIcon} from '@fortawesome/react-native-fontawesome';
 import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+  faCheck,
+  faUser,
+} from '@fortawesome/free-solid-svg-icons';
+import {getDeliveryHistory, OrderRecord} from '../../../shared/services/api';
 
-type HistoryStatus = 'DELIVERED' | 'FAILED';
+type HistoryStatus = 'DELIVERED';
 
 type HistoryDelivery = {
   id: string;
@@ -20,52 +21,48 @@ type HistoryDelivery = {
   completedOn: string;
 };
 
-type HistoryFilter = 'ALL' | 'DELIVERED' | 'FAILED';
+type HistoryFilter = 'ALL' | 'DELIVERED';
 
-// Demo records for frontend development only.
-// Replace with backend data when the delivery history API is ready.
-const historyDeliveries: HistoryDelivery[] = [
-  {
-    id: '#DM12349',
-    customer: 'Customer',
-    area: 'Birta',
-    amount: 'NPR 760',
-    payment: 'COD',
+const mapOrderToHistoryDelivery = (order: OrderRecord): HistoryDelivery => {
+  const location = order.deliveryLocation || {};
+  const deliveredAt = order.deliveredAt || order.updatedAt || order.createdAt;
+  return {
+    id: `#${order.orderNumber}`,
+    customer: location.name || order.customer?.fullName || 'Customer',
+    area: [location.locality, location.cityName, location.formattedAddress]
+      .filter(Boolean)
+      .join(', ') || 'Address unavailable',
+    amount: `NPR ${Number(order.total || 0).toLocaleString('en-IN')}`,
+    payment: String(order.paymentMethod).toLowerCase() === 'cod' ? 'COD' : 'ONLINE',
     status: 'DELIVERED',
-    completedOn: 'Today, 10:45 AM',
-  },
-  {
-    id: '#DM12350',
-    customer: 'Customer',
-    area: 'Power House',
-    amount: 'NPR 530',
-    payment: 'COD',
-    status: 'FAILED',
-    completedOn: 'Today, 9:20 AM',
-  },
-  {
-    id: '#DM12341',
-    customer: 'Customer',
-    area: 'Adarsh Nagar',
-    amount: 'NPR 920',
-    payment: 'ONLINE',
-    status: 'DELIVERED',
-    completedOn: 'Yesterday, 5:15 PM',
-  },
-  {
-    id: '#DM12338',
-    customer: 'Customer',
-    area: 'Ghantaghar',
-    amount: 'NPR 680',
-    payment: 'COD',
-    status: 'FAILED',
-    completedOn: 'Yesterday, 2:30 PM',
-  },
-];
+    completedOn: deliveredAt ? new Date(deliveredAt).toLocaleString() : 'Date unavailable',
+  };
+};
 
 function DeliveryHistoryScreen() {
-  const [selectedFilter, setSelectedFilter] =
-    useState<HistoryFilter>('ALL');
+  const [selectedFilter, setSelectedFilter] = useState<HistoryFilter>('ALL');
+  const [historyDeliveries, setHistoryDeliveries] = useState<HistoryDelivery[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      getDeliveryHistory()
+        .then(records => {
+          if (active) setHistoryDeliveries(records.map(mapOrderToHistoryDelivery));
+        })
+        .catch(error => {
+          if (active) {
+            Alert.alert(
+              'Delivery history unavailable',
+              error instanceof Error ? error.message : 'Please retry.',
+            );
+          }
+        });
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
 
   const filteredDeliveries = useMemo(() => {
     if (selectedFilter === 'ALL') {
@@ -81,35 +78,19 @@ function DeliveryHistoryScreen() {
     delivery => delivery.status === 'DELIVERED',
   ).length;
 
-  const failedCount = historyDeliveries.filter(
-    delivery => delivery.status === 'FAILED',
-  ).length;
-
-  const getStatusStyle = (status: HistoryStatus) => {
-    if (status === 'DELIVERED') {
-      return {
-        backgroundColor: '#E8F5E9',
-        textColor: '#2E7D32',
-        label: 'DELIVERED',
-      };
-    }
-
+  const getStatusStyle = () => {
     return {
-      backgroundColor: '#FDECEC',
-      textColor: '#C62828',
-      label: 'FAILED',
+      backgroundColor: '#E8F5E9',
+      textColor: '#2E7D32',
+      label: 'DELIVERED',
     };
   };
 
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-      edges={['top', 'left', 'right']}
-    >
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView
         contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
+        showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>Delivery History</Text>
@@ -121,9 +102,7 @@ function DeliveryHistoryScreen() {
 
         <View style={styles.summaryRow}>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>
-              {historyDeliveries.length}
-            </Text>
+            <Text style={styles.summaryValue}>{historyDeliveries.length}</Text>
             <Text style={styles.summaryLabel}>Total</Text>
           </View>
 
@@ -134,51 +113,39 @@ function DeliveryHistoryScreen() {
             <Text style={styles.summaryLabel}>Delivered</Text>
           </View>
 
-          <View style={styles.summaryDivider} />
-
-          <View style={styles.summaryItem}>
-            <Text style={[styles.summaryValue, styles.failedValue]}>
-              {failedCount}
-            </Text>
-            <Text style={styles.summaryLabel}>Failed</Text>
-          </View>
         </View>
 
         <View style={styles.filterContainer}>
-          {(['ALL', 'DELIVERED', 'FAILED'] as HistoryFilter[]).map(
-            filter => {
-              const isSelected = selectedFilter === filter;
+          {(['ALL', 'DELIVERED'] as HistoryFilter[]).map(filter => {
+            const isSelected = selectedFilter === filter;
 
-              return (
-                <Pressable
-                  key={filter}
+            return (
+              <Pressable
+                key={filter}
+                style={[
+                  styles.filterButton,
+                  isSelected && styles.filterButtonSelected,
+                ]}
+                onPress={() => setSelectedFilter(filter)}
+                accessibilityRole="button"
+                accessibilityState={{selected: isSelected}}>
+                <Text
                   style={[
-                    styles.filterButton,
-                    isSelected && styles.filterButtonSelected,
-                  ]}
-                  onPress={() => setSelectedFilter(filter)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isSelected }}
-                >
-                  <Text
-                    style={[
-                      styles.filterText,
-                      isSelected && styles.filterTextSelected,
-                    ]}
-                  >
-                    {filter === 'ALL' ? 'All' : filter}
-                  </Text>
-                </Pressable>
-              );
-            },
-          )}
+                    styles.filterText,
+                    isSelected && styles.filterTextSelected,
+                  ]}>
+                  {filter === 'ALL' ? 'All' : filter}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
             {selectedFilter === 'ALL'
               ? 'Past Deliveries'
-              : `${selectedFilter === 'DELIVERED' ? 'Delivered' : 'Failed'} Deliveries`}
+              : 'Delivered Deliveries'}
           </Text>
           <Text style={styles.resultCount}>
             {filteredDeliveries.length} records
@@ -187,7 +154,7 @@ function DeliveryHistoryScreen() {
 
         {filteredDeliveries.length > 0 ? (
           filteredDeliveries.map(delivery => {
-            const statusStyle = getStatusStyle(delivery.status);
+            const statusStyle = getStatusStyle();
 
             return (
               <View key={delivery.id} style={styles.deliveryCard}>
@@ -200,15 +167,13 @@ function DeliveryHistoryScreen() {
                   <View
                     style={[
                       styles.statusBadge,
-                      { backgroundColor: statusStyle.backgroundColor },
-                    ]}
-                  >
+                      {backgroundColor: statusStyle.backgroundColor},
+                    ]}>
                     <Text
                       style={[
                         styles.statusText,
-                        { color: statusStyle.textColor },
-                      ]}
-                    >
+                        {color: statusStyle.textColor},
+                      ]}>
                       {statusStyle.label}
                     </Text>
                   </View>
@@ -218,25 +183,19 @@ function DeliveryHistoryScreen() {
 
                 <View style={styles.customerRow}>
                   <View style={styles.customerIcon}>
-                    <Text style={styles.customerIconText}>C</Text>
+                    <FontAwesomeIcon icon={faUser} size={16} color="#2E7D32" />
                   </View>
 
                   <View style={styles.customerInfo}>
-                    <Text style={styles.customerName}>
-                      {delivery.customer}
-                    </Text>
-                    <Text style={styles.customerArea}>
-                      {delivery.area}
-                    </Text>
+                    <Text style={styles.customerName}>{delivery.customer}</Text>
+                    <Text style={styles.customerArea}>{delivery.area}</Text>
                   </View>
                 </View>
 
                 <View style={styles.detailsRow}>
                   <View style={styles.detailBox}>
                     <Text style={styles.detailLabel}>Payment</Text>
-                    <Text style={styles.detailValue}>
-                      {delivery.payment}
-                    </Text>
+                    <Text style={styles.detailValue}>{delivery.payment}</Text>
                   </View>
 
                   <View style={styles.detailBox}>
@@ -254,9 +213,7 @@ function DeliveryHistoryScreen() {
                 <View style={styles.bottomRow}>
                   <View>
                     <Text style={styles.amountLabel}>Order Amount</Text>
-                    <Text style={styles.amountValue}>
-                      {delivery.amount}
-                    </Text>
+                    <Text style={styles.amountValue}>{delivery.amount}</Text>
                   </View>
                   <Text style={styles.readOnlyLabel}>History</Text>
                 </View>
@@ -266,7 +223,7 @@ function DeliveryHistoryScreen() {
         ) : (
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
-              <Text style={styles.emptyIconText}>✓</Text>
+              <FontAwesomeIcon icon={faCheck} size={24} color="#2E7D32" />
             </View>
 
             <Text style={styles.emptyTitle}>No deliveries found</Text>
@@ -434,11 +391,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 11,
   },
-  customerIconText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#2E7D32',
-  },
   customerInfo: {
     flex: 1,
   },
@@ -511,11 +463,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 15,
-  },
-  emptyIconText: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#2E7D32',
   },
   emptyTitle: {
     fontSize: 17,

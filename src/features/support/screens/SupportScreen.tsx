@@ -1,7 +1,17 @@
+
 import React from 'react';
 
+import {FontAwesomeIcon} from '@fortawesome/react-native-fontawesome';
 import {
-  Alert,
+  faArrowLeft,
+  faCheck,
+  faChevronRight,
+  faCirclePlus,
+  faHeadset,
+  faTicket,
+} from '@fortawesome/free-solid-svg-icons';
+
+import {
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -15,48 +25,57 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
 
-type SupportNavigationProp =
-  NativeStackNavigationProp<MainStackParamList, 'Support'>;
+import {useSupportTickets} from '../context/SupportTicketContext';
+import type {
+  SupportTicket,
+  TicketStatus,
+} from '../context/SupportTicketContext';
 
-type SupportTicket = {
-  id: string;
-  subject: string;
-  category: string;
-  status: 'OPEN' | 'IN PROGRESS' | 'RESOLVED';
-  updatedAt: string;
+type SupportNavigationProp = NativeStackNavigationProp<
+  MainStackParamList,
+  'Support'
+>;
+
+const getStatusStyles = (status: TicketStatus) => {
+  switch (status) {
+    case 'OPEN':
+      return {
+        container: styles.ticketStatusOpen,
+        text: styles.ticketStatusTextOpen,
+      };
+
+    case 'IN PROGRESS':
+      return {
+        container: styles.ticketStatusProgress,
+        text: styles.ticketStatusTextProgress,
+      };
+
+    case 'RESOLVED':
+      return {
+        container: styles.ticketStatusResolved,
+        text: styles.ticketStatusTextResolved,
+      };
+
+    default:
+      return {
+        container: styles.ticketStatusOpen,
+        text: styles.ticketStatusTextOpen,
+      };
+  }
 };
 
-const DEMO_TICKETS: SupportTicket[] = [
-  {
-    id: 'SUP-1001',
-    subject: 'Unable to contact customer',
-    category: 'Delivery',
-    status: 'IN PROGRESS',
-    updatedAt: 'Today, 10:35 AM',
-  },
-  {
-    id: 'SUP-1000',
-    subject: 'Payment collection clarification',
-    category: 'Payment',
-    status: 'RESOLVED',
-    updatedAt: 'Yesterday, 4:20 PM',
-  },
-];
-
 const SupportScreen = () => {
-  const navigation =
-    useNavigation<SupportNavigationProp>();
+  const navigation = useNavigation<SupportNavigationProp>();
+  const {tickets} = useSupportTickets();
+
+  // The shared context inserts new tickets at the beginning.
+  // Display only the two most recently added tickets here.
+  const recentTickets = tickets.slice(0, 2);
 
   const handleContactSupport = () => {
-    Alert.alert(
-      'Contact Support',
-      'The DailyMart Nepal support contact system will be connected during the backend phase.',
-      [
-        {
-          text: 'OK',
-        },
-      ],
-    );
+    // No live contact details are configured yet.
+    // Route the rider to the available support request flow.
+    navigation.navigate('CreateSupportTicket');
   };
 
   const handleCreateTicket = () => {
@@ -67,9 +86,7 @@ const SupportScreen = () => {
     navigation.navigate('SupportTickets');
   };
 
-  const handleTicketPress = (
-    ticket: SupportTicket,
-  ) => {
+  const handleTicketPress = (ticket: SupportTicket) => {
     navigation.navigate('SupportTicketDetails', {
       ticketId: ticket.id,
     });
@@ -88,12 +105,14 @@ const SupportScreen = () => {
             onPress={() => navigation.goBack()}
             accessibilityRole="button"
             accessibilityLabel="Go back">
-            <Text style={styles.backArrow}>‹</Text>
+            <FontAwesomeIcon
+              icon={faArrowLeft}
+              size={18}
+              color="#1F2937"
+            />
           </Pressable>
 
-          <Text style={styles.headerTitle}>
-            Support & Help
-          </Text>
+          <Text style={styles.headerTitle}>Support &amp; Help</Text>
 
           <View style={styles.headerSpacer} />
         </View>
@@ -102,9 +121,7 @@ const SupportScreen = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}>
           <View style={styles.introSection}>
-            <Text style={styles.introTitle}>
-              How can we help?
-            </Text>
+            <Text style={styles.introTitle}>How can we help?</Text>
 
             <Text style={styles.introText}>
               Get help with deliveries, payments, account issues,
@@ -123,7 +140,11 @@ const SupportScreen = () => {
                   styles.actionIconContainer,
                   styles.supportIconBackground,
                 ]}>
-                <Text style={styles.supportIcon}>?</Text>
+                <FontAwesomeIcon
+                  icon={faHeadset}
+                  size={21}
+                  color="#2E7D32"
+                />
               </View>
 
               <View style={styles.supportCardContent}>
@@ -132,11 +153,15 @@ const SupportScreen = () => {
                 </Text>
 
                 <Text style={styles.supportCardDescription}>
-                  Get help from the DailyMart Nepal support team.
+                  Get help with a delivery, payment, or account issue.
                 </Text>
               </View>
 
-              <Text style={styles.cardArrow}>›</Text>
+              <FontAwesomeIcon
+                icon={faChevronRight}
+                size={15}
+                color="#2E7D32"
+              />
             </Pressable>
 
             <Pressable
@@ -149,7 +174,11 @@ const SupportScreen = () => {
                   styles.actionIconContainer,
                   styles.ticketIconBackground,
                 ]}>
-                <Text style={styles.ticketIcon}>+</Text>
+                <FontAwesomeIcon
+                  icon={faCirclePlus}
+                  size={24}
+                  color="#1976D2"
+                />
               </View>
 
               <View style={styles.supportCardContent}>
@@ -162,7 +191,11 @@ const SupportScreen = () => {
                 </Text>
               </View>
 
-              <Text style={styles.cardArrow}>›</Text>
+              <FontAwesomeIcon
+                icon={faChevronRight}
+                size={15}
+                color="#2E7D32"
+              />
             </Pressable>
 
             <Pressable
@@ -175,7 +208,11 @@ const SupportScreen = () => {
                   styles.actionIconContainer,
                   styles.ticketListIconBackground,
                 ]}>
-                <Text style={styles.ticketListIcon}>T</Text>
+                <FontAwesomeIcon
+                  icon={faTicket}
+                  size={20}
+                  color="#F59E0B"
+                />
               </View>
 
               <View style={styles.supportCardContent}>
@@ -184,11 +221,15 @@ const SupportScreen = () => {
                 </Text>
 
                 <Text style={styles.supportCardDescription}>
-                  View your previous support requests and statuses.
+                  View your support requests and their statuses.
                 </Text>
               </View>
 
-              <Text style={styles.cardArrow}>›</Text>
+              <FontAwesomeIcon
+                icon={faChevronRight}
+                size={15}
+                color="#2E7D32"
+              />
             </Pressable>
           </View>
 
@@ -197,17 +238,22 @@ const SupportScreen = () => {
               Recent Support Requests
             </Text>
 
-            <Pressable onPress={handleViewTickets}>
-              <Text style={styles.sectionAction}>
-                View all
-              </Text>
+            <Pressable
+              onPress={handleViewTickets}
+              accessibilityRole="button"
+              accessibilityLabel="View all support tickets">
+              <Text style={styles.sectionAction}>View all</Text>
             </Pressable>
           </View>
 
-          {DEMO_TICKETS.length === 0 ? (
+          {recentTickets.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyIconContainer}>
-                <Text style={styles.emptyIcon}>✓</Text>
+                <FontAwesomeIcon
+                  icon={faCheck}
+                  size={24}
+                  color="#2E7D32"
+                />
               </View>
 
               <Text style={styles.emptyTitle}>
@@ -215,69 +261,69 @@ const SupportScreen = () => {
               </Text>
 
               <Text style={styles.emptyDescription}>
-                Your support tickets will appear here when you
-                create one.
+                Your support tickets will appear here when you create one.
               </Text>
+
+              <Pressable
+                style={styles.emptyActionButton}
+                onPress={handleCreateTicket}
+                accessibilityRole="button">
+                <Text style={styles.emptyActionButtonText}>
+                  Create a ticket
+                </Text>
+              </Pressable>
             </View>
           ) : (
-            DEMO_TICKETS.map(ticket => (
-              <Pressable
-                key={ticket.id}
-                style={styles.ticketCard}
-                onPress={() =>
-                  handleTicketPress(ticket)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`Open support ticket ${ticket.id}`}>
-                <View style={styles.ticketTopRow}>
-                  <View style={styles.ticketTitleContainer}>
-                    <Text style={styles.ticketId}>
-                      {ticket.id}
-                    </Text>
+            recentTickets.map(ticket => {
+              const statusStyles = getStatusStyles(ticket.status);
 
-                    <Text style={styles.ticketSubject}>
-                      {ticket.subject}
-                    </Text>
-                  </View>
+              return (
+                <Pressable
+                  key={ticket.id}
+                  style={styles.ticketCard}
+                  onPress={() => handleTicketPress(ticket)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open support ticket ${ticket.id}`}>
+                  <View style={styles.ticketTopRow}>
+                    <View style={styles.ticketTitleContainer}>
+                      <Text style={styles.ticketId}>
+                        {ticket.id}
+                      </Text>
 
-                  <View
-                    style={[
-                      styles.ticketStatusBadge,
-                      ticket.status === 'OPEN' &&
-                        styles.ticketStatusOpen,
-                      ticket.status === 'IN PROGRESS' &&
-                        styles.ticketStatusProgress,
-                      ticket.status === 'RESOLVED' &&
-                        styles.ticketStatusResolved,
-                    ]}>
-                    <Text
+                      <Text style={styles.ticketSubject}>
+                        {ticket.subject}
+                      </Text>
+                    </View>
+
+                    <View
                       style={[
-                        styles.ticketStatusText,
-                        ticket.status === 'OPEN' &&
-                          styles.ticketStatusTextOpen,
-                        ticket.status === 'IN PROGRESS' &&
-                          styles.ticketStatusTextProgress,
-                        ticket.status === 'RESOLVED' &&
-                          styles.ticketStatusTextResolved,
+                        styles.ticketStatusBadge,
+                        statusStyles.container,
                       ]}>
-                      {ticket.status}
+                      <Text
+                        style={[
+                          styles.ticketStatusText,
+                          statusStyles.text,
+                        ]}>
+                        {ticket.status}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.ticketDivider} />
+
+                  <View style={styles.ticketBottomRow}>
+                    <Text style={styles.ticketCategory}>
+                      {ticket.category}
+                    </Text>
+
+                    <Text style={styles.ticketUpdated}>
+                      {ticket.updatedAt}
                     </Text>
                   </View>
-                </View>
-
-                <View style={styles.ticketDivider} />
-
-                <View style={styles.ticketBottomRow}>
-                  <Text style={styles.ticketCategory}>
-                    {ticket.category}
-                  </Text>
-
-                  <Text style={styles.ticketUpdated}>
-                    {ticket.updatedAt}
-                  </Text>
-                </View>
-              </Pressable>
-            ))
+                </Pressable>
+              );
+            })
           )}
 
           <View style={styles.emergencySection}>
@@ -293,17 +339,19 @@ const SupportScreen = () => {
               </View>
 
               <View style={styles.sosBadge}>
-                <Text style={styles.sosBadgeText}>
-                  SOS
-                </Text>
+                <Text style={styles.sosBadgeText}>SOS</Text>
               </View>
             </View>
 
             <Text style={styles.emergencyText}>
-              Use the emergency option only when immediate
-              assistance is required. Normal delivery issues
-              should be reported through Support or a Support
-              Ticket.
+              Use the emergency option only when immediate assistance
+              is required. Normal delivery issues should be reported
+              through Support or a Support Ticket.
+            </Text>
+
+            <Text style={styles.demoNotice}>
+              Demo mode: SOS does not currently contact emergency
+              services or send a live alert.
             </Text>
 
             <Pressable
@@ -324,7 +372,6 @@ const SupportScreen = () => {
 
             <View style={styles.helpTopicRow}>
               <Text style={styles.helpTopicBullet}>•</Text>
-
               <Text style={styles.helpTopicText}>
                 Customer unavailable or unreachable
               </Text>
@@ -332,7 +379,6 @@ const SupportScreen = () => {
 
             <View style={styles.helpTopicRow}>
               <Text style={styles.helpTopicBullet}>•</Text>
-
               <Text style={styles.helpTopicText}>
                 Wrong or difficult delivery location
               </Text>
@@ -340,7 +386,6 @@ const SupportScreen = () => {
 
             <View style={styles.helpTopicRow}>
               <Text style={styles.helpTopicBullet}>•</Text>
-
               <Text style={styles.helpTopicText}>
                 COD or payment collection issue
               </Text>
@@ -348,7 +393,6 @@ const SupportScreen = () => {
 
             <View style={styles.helpTopicRow}>
               <Text style={styles.helpTopicBullet}>•</Text>
-
               <Text style={styles.helpTopicText}>
                 Vehicle or delivery equipment problem
               </Text>
@@ -389,12 +433,6 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  backArrow: {
-    fontSize: 32,
-    lineHeight: 32,
-    color: '#1F2937',
   },
 
   headerTitle: {
@@ -469,24 +507,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8E1',
   },
 
-  supportIcon: {
-    fontSize: 23,
-    fontWeight: '800',
-    color: '#2E7D32',
-  },
-
-  ticketIcon: {
-    fontSize: 28,
-    fontWeight: '400',
-    color: '#1976D2',
-  },
-
-  ticketListIcon: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#F59E0B',
-  },
-
   supportCardContent: {
     flex: 1,
     paddingRight: 8,
@@ -503,12 +523,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: '#6B7280',
-  },
-
-  cardArrow: {
-    fontSize: 26,
-    fontWeight: '400',
-    color: '#2E7D32',
   },
 
   sectionHeader: {
@@ -644,12 +658,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
-  emptyIcon: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#2E7D32',
-  },
-
   emptyTitle: {
     fontSize: 16,
     fontWeight: '700',
@@ -662,6 +670,20 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: '#6B7280',
     textAlign: 'center',
+  },
+
+  emptyActionButton: {
+    marginTop: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#E8F5E9',
+  },
+
+  emptyActionButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#2E7D32',
   },
 
   emergencySection: {
@@ -716,6 +738,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: '#7F1D1D',
+  },
+
+  demoNotice: {
+    marginTop: 10,
+    fontSize: 11,
+    lineHeight: 17,
+    color: '#92400E',
   },
 
   emergencyButton: {

@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-
+import React, {useState} from 'react';
 import {
   Alert,
   Pressable,
@@ -9,7 +8,7 @@ import {
   View,
 } from 'react-native';
 
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {
   useNavigation,
@@ -20,7 +19,8 @@ import type {
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 
-import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
+import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
+import {finishDelivery} from '../../../shared/services/api';
 
 type DeliveryCompletionScreenProps =
   NativeStackScreenProps<
@@ -37,35 +37,37 @@ function DeliveryCompletionScreen({
   const navigation =
     useNavigation<DeliveryCompletionNavigationProp>();
 
-  const { deliveryId } = route.params;
+  const {deliveryId} = route.params;
 
   const [isCompleted, setIsCompleted] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
+  const [completedAt, setCompletedAt] = useState<Date | null>(null);
 
   const handleCompleteDelivery = () => {
     Alert.alert(
       'Complete Delivery',
-      'Are you sure the order has been successfully handed over to the customer?',
+      'Confirm that the order has been handed over to the customer.',
       [
         {
-          text: 'CANCEL',
+          text: 'Cancel',
           style: 'cancel',
         },
         {
-          text: 'CONFIRM',
-          onPress: () => {
-            /*
-             * Frontend simulation for now.
-             *
-             * Backend completion API will be connected later.
-             * The backend will become authoritative for:
-             * - delivery completion
-             * - partner authorization
-             * - order state
-             * - GPS
-             * - verification details
-             * - deliveredAt
-             */
-            setIsCompleted(true);
+          text: 'Confirm',
+          onPress: async () => {
+            if (isCompleting) return;
+            setIsCompleting(true);
+            try {
+              const result = await finishDelivery(deliveryId.replace(/^#/, ''));
+              setCompletedAt(
+                result.order.deliveredAt ? new Date(result.order.deliveredAt) : new Date(),
+              );
+              setIsCompleted(true);
+            } catch (error) {
+              Alert.alert('Delivery not completed', error instanceof Error ? error.message : 'Verify payment and customer OTP, then retry.');
+            } finally {
+              setIsCompleting(false);
+            }
           },
         },
       ],
@@ -76,398 +78,240 @@ function DeliveryCompletionScreen({
     navigation.navigate('Home');
   };
 
-  const handleBackToVerification = () => {
+  const handleBack = () => {
     navigation.goBack();
   };
 
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-      edges={['top', 'left', 'right']}
-    >
+    <SafeAreaView style={styles.safeArea}>
       <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.pageLabel}>
+          <View>
+            <Text style={styles.headerTitle}>
               Delivery Completion
             </Text>
 
-            <Text style={styles.orderId}>
+            <Text style={styles.headerOrder}>
               {deliveryId}
             </Text>
           </View>
 
           <View
             style={[
-              styles.headerBadge,
-              isCompleted && styles.headerBadgeCompleted,
-            ]}
-          >
+              styles.statusBadge,
+              isCompleted && styles.statusBadgeCompleted,
+            ]}>
             <Text
               style={[
-                styles.headerBadgeText,
-                isCompleted &&
-                  styles.headerBadgeTextCompleted,
-              ]}
-            >
+                styles.statusBadgeText,
+                isCompleted && styles.statusBadgeTextCompleted,
+              ]}>
               {isCompleted ? 'COMPLETED' : 'FINAL STEP'}
             </Text>
           </View>
         </View>
 
-        {/* Completion Progress */}
-        <View style={styles.progressCard}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressTitle}>
-              Delivery process
-            </Text>
-
-            <Text style={styles.progressCount}>
-              {isCompleted ? '4 / 4' : '3 / 4'}
-            </Text>
-          </View>
-
-          <View style={styles.progressTrack}>
-            <View
-              style={[
-                styles.progressFill,
-                isCompleted
-                  ? styles.progressFillComplete
-                  : styles.progressFillBeforeComplete,
-              ]}
-            />
-          </View>
-
-          <Text style={styles.progressDescription}>
-            {isCompleted
-              ? 'The delivery has been marked as completed successfully.'
-              : 'Package and customer verification are complete. Confirm the final handover.'}
-          </Text>
-        </View>
-
         {!isCompleted ? (
           <>
-            {/* Verification Summary */}
-            <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>
-                    ✓
-                  </Text>
-                </View>
-
-                <View style={styles.sectionHeaderText}>
-                  <Text style={styles.cardTitle}>
-                    Verification Completed
-                  </Text>
-
-                  <Text style={styles.cardSubtitle}>
-                    Both required verification steps have been
-                    completed before final delivery confirmation.
-                  </Text>
-                </View>
+            {/* Main completion card */}
+            <View style={styles.completionCard}>
+              <View style={styles.checkCircle}>
+                <Text style={styles.checkText}>✓</Text>
               </View>
 
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  Package QR / Barcode
-                </Text>
+              <Text style={styles.completionTitle}>
+                Ready to Complete
+              </Text>
 
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    styles.successValue,
-                  ]}
-                >
-                  VERIFIED
-                </Text>
-              </View>
-
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  Customer OTP
-                </Text>
-
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    styles.successValue,
-                  ]}
-                >
-                  VERIFIED
-                </Text>
-              </View>
-
-              <View style={styles.summaryRowLast}>
-                <Text style={styles.summaryLabel}>
-                  Verification status
-                </Text>
-
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    styles.successValue,
-                  ]}
-                >
-                  READY TO COMPLETE
-                </Text>
-              </View>
+              <Text style={styles.completionDescription}>
+                Customer OTP is verified and payment is recorded. DailyMart will confirm delivery when you mark it complete.
+              </Text>
             </View>
 
-            {/* Delivery Summary */}
+            {/* Delivery details */}
             <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>
-                    4
-                  </Text>
-                </View>
+              <Text style={styles.cardTitle}>
+                Delivery Details
+              </Text>
 
-                <View style={styles.sectionHeaderText}>
-                  <Text style={styles.cardTitle}>
-                    Delivery Summary
-                  </Text>
-
-                  <Text style={styles.cardSubtitle}>
-                    Review the final delivery information before
-                    confirming handover.
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>
                   Order ID
                 </Text>
 
                 <Text
-                  style={styles.summaryValue}
-                  numberOfLines={1}
-                >
+                  style={styles.detailValue}
+                  numberOfLines={1}>
                   {deliveryId}
                 </Text>
               </View>
 
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  Package count
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>
+                  Package label check
                 </Text>
 
-                <Text style={styles.summaryValue}>
-                  1 package
-                </Text>
-              </View>
-
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  Verification method
-                </Text>
-
-                <Text style={styles.summaryValue}>
-                  QR + OTP
+                <Text style={styles.detailValue}>
+                  Optional app check
                 </Text>
               </View>
 
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  Handover status
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>
+                  Customer Verification
                 </Text>
 
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    styles.pendingValue,
-                  ]}
-                >
-                  Awaiting confirmation
+                <Text style={styles.successValue}>
+                  VERIFIED BY DAILYMART
                 </Text>
               </View>
 
-              <View style={styles.summaryRowLast}>
-                <Text style={styles.summaryLabel}>
-                  Delivery status
+              <View style={styles.detailRowLast}>
+                <Text style={styles.detailLabel}>
+                  Payment
                 </Text>
 
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    styles.pendingValue,
-                  ]}
-                >
-                  Ready to complete
+                <Text style={styles.successValue}>
+                  CONFIRMED
                 </Text>
               </View>
             </View>
 
-            {/* Important Notice */}
-            <View style={styles.noticeCard}>
-              <View style={styles.noticeIcon}>
-                <Text style={styles.noticeIconText}>
-                  !
-                </Text>
-              </View>
+            {/* Confirmation note */}
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>
+                Before completing
+              </Text>
 
-              <View style={styles.noticeContent}>
-                <Text style={styles.noticeTitle}>
-                  Before completing
-                </Text>
-
-                <Text style={styles.noticeText}>
-                  Confirm that the parcel has been handed over
-                  to the correct customer and there are no
-                  remaining delivery issues.
-                </Text>
-              </View>
+              <Text style={styles.infoText}>
+                Make sure the parcel has been handed over to the
+                correct customer and there are no remaining issues.
+              </Text>
             </View>
 
-            {/* Complete Button */}
+            {/* Complete */}
             <Pressable
-              style={styles.primaryButton}
+              style={[styles.primaryButton, isCompleting && {opacity: 0.6}]}
               onPress={handleCompleteDelivery}
-            >
+              disabled={isCompleting}>
               <Text style={styles.primaryButtonText}>
-                MARK DELIVERY COMPLETE
+                {isCompleting ? 'SAVING DELIVERY…' : 'MARK DELIVERY COMPLETE'}
               </Text>
             </Pressable>
 
             {/* Back */}
             <Pressable
               style={styles.secondaryButton}
-              onPress={handleBackToVerification}
-            >
+              onPress={handleBack}>
               <Text style={styles.secondaryButtonText}>
-                BACK TO VERIFICATION
+                BACK
               </Text>
             </Pressable>
           </>
         ) : (
           <>
-            {/* Completed State */}
-            <View style={styles.completedCard}>
-              <View style={styles.completedIcon}>
-                <Text style={styles.completedIconText}>
+            {/* Success */}
+            <View style={styles.successCard}>
+              <View style={styles.successCircle}>
+                <Text style={styles.successCheck}>
                   ✓
                 </Text>
               </View>
 
-              <Text style={styles.completedTitle}>
+              <Text style={styles.successTitle}>
                 Delivery Completed
               </Text>
 
-              <Text style={styles.completedDescription}>
-                The delivery has been successfully completed
-                and the order handover is confirmed.
+              <Text style={styles.successDescription}>
+                The order has been successfully handed over to
+                the customer.
               </Text>
 
-              <View style={styles.completedStatus}>
-                <View style={styles.completedStatusDot} />
+              <View style={styles.deliveredBadge}>
+                <View style={styles.deliveredDot} />
 
-                <Text style={styles.completedStatusText}>
+                <Text style={styles.deliveredText}>
                   DELIVERED
                 </Text>
               </View>
             </View>
 
-            {/* Completion Details */}
+            {/* Completion details */}
             <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>
-                    ✓
-                  </Text>
-                </View>
+              <Text style={styles.cardTitle}>
+                Completion Details
+              </Text>
 
-                <View style={styles.sectionHeaderText}>
-                  <Text style={styles.cardTitle}>
-                    Completion Details
-                  </Text>
-
-                  <Text style={styles.cardSubtitle}>
-                    The frontend completion state has been
-                    recorded for this delivery.
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>
                   Order ID
                 </Text>
 
-                <Text style={styles.summaryValue}>
+                <Text
+                  style={styles.detailValue}
+                  numberOfLines={1}>
                   {deliveryId}
                 </Text>
               </View>
 
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  Package verification
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>
+                  Payment
                 </Text>
 
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    styles.successValue,
-                  ]}
-                >
-                  VERIFIED
+                <Text style={styles.successValue}>
+                  CONFIRMED
                 </Text>
               </View>
 
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  Customer verification
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>
+                  Delivery Status
                 </Text>
 
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    styles.successValue,
-                  ]}
-                >
-                  VERIFIED
-                </Text>
-              </View>
-
-              <View style={styles.summaryRowLast}>
-                <Text style={styles.summaryLabel}>
-                  Final status
-                </Text>
-
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    styles.successValue,
-                  ]}
-                >
+                <Text style={styles.successValue}>
                   DELIVERED
                 </Text>
               </View>
+
+              <View style={styles.detailRowLast}>
+                <Text style={styles.detailLabel}>
+                  Delivered At
+                </Text>
+
+                <Text style={styles.detailValue}>
+                  {completedAt
+                    ? formatTime(completedAt)
+                    : '--'}
+                </Text>
+              </View>
             </View>
 
-            {/* Backend Note */}
-            <View style={styles.backendNotice}>
-              <Text style={styles.backendNoticeTitle}>
-                Backend integration comes next
+            {/* Backend note */}
+            <View style={styles.backendCard}>
+              <Text style={styles.backendTitle}>
+                Delivery Recorded
               </Text>
 
-              <Text style={styles.backendNoticeText}>
-                The current screen simulates successful
-                completion on the frontend. Later, the backend
-                will securely validate and record the final
-                delivery state.
+              <Text style={styles.backendText}>
+                DailyMart confirmed and saved this delivery as delivered.
               </Text>
             </View>
 
-            {/* Home Button */}
+            {/* Home */}
             <Pressable
               style={styles.primaryButton}
-              onPress={handleBackToHome}
-            >
+              onPress={handleBackToHome}>
               <Text style={styles.primaryButtonText}>
                 BACK TO HOME
               </Text>
@@ -485,9 +329,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F7FAF7',
   },
 
-  content: {
+  container: {
     paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingTop: 12,
     paddingBottom: 32,
   },
 
@@ -498,172 +342,190 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  headerTextContainer: {
-    flex: 1,
-    paddingRight: 12,
-  },
-
-  pageLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-
-  orderId: {
-    fontSize: 25,
+  headerTitle: {
+    fontSize: 22,
     fontWeight: '700',
     color: '#111827',
   },
 
-  headerBadge: {
-    borderRadius: 8,
-    paddingHorizontal: 9,
+  headerOrder: {
+    marginTop: 4,
+    fontSize: 13,
+    color: '#737B73',
+    fontWeight: '500',
+  },
+
+  statusBadge: {
+    paddingHorizontal: 10,
     paddingVertical: 7,
+    borderRadius: 8,
     backgroundColor: '#FFF3E0',
   },
 
-  headerBadgeCompleted: {
+  statusBadgeCompleted: {
     backgroundColor: '#E8F5E9',
   },
 
-  headerBadgeText: {
-    fontSize: 8,
-    fontWeight: '700',
-    color: '#B26A00',
+  statusBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#A66A00',
+    letterSpacing: 0.4,
   },
 
-  headerBadgeTextCompleted: {
+  statusBadgeTextCompleted: {
     color: '#2E7D32',
   },
 
-  progressCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 17,
-    padding: 18,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#E5EAE5',
-  },
-
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  completionCard: {
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 24,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8E2',
   },
 
-  progressTitle: {
-    fontSize: 14,
+  checkCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E8F5E9',
+    marginBottom: 14,
+  },
+
+  checkText: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#2E7D32',
+  },
+
+  completionTitle: {
+    fontSize: 19,
     fontWeight: '700',
     color: '#1F2937',
+    textAlign: 'center',
   },
 
-  progressCount: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2E7D32',
-  },
-
-  progressTrack: {
-    height: 7,
-    backgroundColor: '#E8ECE8',
-    borderRadius: 4,
-    marginTop: 13,
-    overflow: 'hidden',
-  },
-
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#2E7D32',
-    borderRadius: 4,
-  },
-
-  progressFillBeforeComplete: {
-    width: '75%',
-  },
-
-  progressFillComplete: {
-    width: '100%',
-  },
-
-  progressDescription: {
-    marginTop: 10,
+  completionDescription: {
+    marginTop: 8,
     fontSize: 11,
     lineHeight: 17,
-    color: '#7A827A',
+    color: '#6D756D',
+    textAlign: 'center',
+  },
+
+  successCard: {
+    alignItems: 'center',
+    backgroundColor: '#EEF8EF',
+    borderRadius: 18,
+    padding: 24,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#B8DDBA',
+  },
+
+  successCircle: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    backgroundColor: '#2E7D32',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 15,
+  },
+
+  successCheck: {
+    fontSize: 38,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+
+  successTitle: {
+    fontSize: 21,
+    fontWeight: '700',
+    color: '#1F2937',
+    textAlign: 'center',
+  },
+
+  successDescription: {
+    marginTop: 7,
+    fontSize: 11,
+    lineHeight: 17,
+    color: '#667066',
+    textAlign: 'center',
+  },
+
+  deliveredBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 15,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+  },
+
+  deliveredDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2E7D32',
+    marginRight: 7,
+  },
+
+  deliveredText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#2E7D32',
+    letterSpacing: 0.5,
   },
 
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 17,
+    borderRadius: 16,
     padding: 18,
-    marginBottom: 15,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#E5EAE5',
-  },
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 18,
-  },
-
-  stepNumber: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 11,
-  },
-
-  stepNumberText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-
-  sectionHeaderText: {
-    flex: 1,
+    borderColor: '#E2E8E2',
   },
 
   cardTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: '#1F2937',
+    marginBottom: 8,
   },
 
-  cardSubtitle: {
-    marginTop: 5,
-    fontSize: 11,
-    lineHeight: 17,
-    color: '#7A827A',
-  },
-
-  summaryRow: {
+  detailRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 11,
+    justifyContent: 'space-between',
+    paddingVertical: 13,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F2F0',
   },
 
-  summaryRowLast: {
+  detailRowLast: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 11,
+    justifyContent: 'space-between',
+    paddingTop: 13,
   },
 
-  summaryLabel: {
+  detailLabel: {
     flex: 1,
+    paddingRight: 12,
     fontSize: 12,
     color: '#7A827A',
-    paddingRight: 12,
   },
 
-  summaryValue: {
+  detailValue: {
     maxWidth: '55%',
     fontSize: 12,
     fontWeight: '600',
@@ -672,55 +534,55 @@ const styles = StyleSheet.create({
   },
 
   successValue: {
+    maxWidth: '55%',
+    fontSize: 12,
+    fontWeight: '700',
     color: '#2E7D32',
+    textAlign: 'right',
   },
 
-  pendingValue: {
-    color: '#A66A00',
-  },
-
-  noticeCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  infoCard: {
     backgroundColor: '#FFF8E8',
     borderRadius: 14,
     padding: 15,
-    marginBottom: 15,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#F1D99A',
   },
 
-  noticeIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#B87800',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 11,
-  },
-
-  noticeIconText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-
-  noticeContent: {
-    flex: 1,
-  },
-
-  noticeTitle: {
+  infoTitle: {
     fontSize: 13,
     fontWeight: '700',
     color: '#5B4300',
+    marginBottom: 4,
   },
 
-  noticeText: {
-    marginTop: 4,
+  infoText: {
+    fontSize: 11,
+    lineHeight: 17,
+    color: '#786331',
+  },
+
+  backendCard: {
+    backgroundColor: '#F3F5F3',
+    borderRadius: 14,
+    padding: 15,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E1E5E1',
+  },
+
+  backendTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4B5563',
+    marginBottom: 5,
+  },
+
+  backendText: {
     fontSize: 10,
     lineHeight: 16,
-    color: '#786331',
+    color: '#7A827A',
   },
 
   primaryButton: {
@@ -730,14 +592,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#2E7D32',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 2,
   },
 
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '800',
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
   },
 
   secondaryButton: {
@@ -756,96 +617,6 @@ const styles = StyleSheet.create({
     color: '#5F675F',
     fontSize: 13,
     fontWeight: '800',
-  },
-
-  completedCard: {
-    alignItems: 'center',
-    backgroundColor: '#EEF8EF',
-    borderRadius: 17,
-    padding: 24,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#B8DDBA',
-  },
-
-  completedIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-
-  completedIconText: {
-    color: '#FFFFFF',
-    fontSize: 34,
-    fontWeight: '800',
-  },
-
-  completedTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1F2937',
-    textAlign: 'center',
-  },
-
-  completedDescription: {
-    marginTop: 7,
-    fontSize: 11,
-    lineHeight: 17,
-    color: '#667066',
-    textAlign: 'center',
-  },
-
-  completedStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 15,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#C8E6C9',
-  },
-
-  completedStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#2E7D32',
-    marginRight: 7,
-  },
-
-  completedStatusText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    color: '#2E7D32',
-  },
-
-  backendNotice: {
-    backgroundColor: '#F3F5F3',
-    borderRadius: 13,
-    padding: 15,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#E1E5E1',
-  },
-
-  backendNoticeTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#4B5563',
-    marginBottom: 5,
-  },
-
-  backendNoticeText: {
-    fontSize: 10,
-    lineHeight: 16,
-    color: '#7A827A',
   },
 });
 

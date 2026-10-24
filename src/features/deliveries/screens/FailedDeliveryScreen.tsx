@@ -22,6 +22,7 @@ import type {
 } from '@react-navigation/native-stack';
 
 import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
+import {failDelivery} from '../../../shared/services/api';
 
 type FailedDeliveryRouteParams = {
   deliveryId: string;
@@ -140,6 +141,7 @@ function FailedDeliveryScreen() {
 
   const [isSubmitted, setIsSubmitted] =
     useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedReasonDetails =
     FAILURE_REASONS.find(
@@ -164,6 +166,7 @@ function FailedDeliveryScreen() {
   };
 
   const handleSubmit = () => {
+    if (isSubmitting || isSubmitted) return;
     if (selectedReason === null) {
       Alert.alert(
         'Reason Required',
@@ -190,12 +193,12 @@ function FailedDeliveryScreen() {
     }
 
     const actionTitle = isReschedule
-      ? 'Submit Reschedule Request'
+      ? 'Record Delivery Attempt'
       : 'Report Failed Delivery';
 
     const actionMessage = isReschedule
-      ? 'Are you sure you want to submit this delivery reschedule request?'
-      : 'Are you sure you want to report this delivery as failed?';
+      ? 'This will record the unsuccessful attempt and return the order to warehouse dispatch. The app does not schedule a new delivery time.'
+      : 'Are you sure you want to report this delivery as failed? The order will return to warehouse dispatch.';
 
     Alert.alert(
       actionTitle,
@@ -207,22 +210,23 @@ function FailedDeliveryScreen() {
         },
         {
           text: 'CONFIRM',
-          onPress: () => {
-            /*
-             * Temporary frontend behavior.
-             *
-             * Backend will later validate:
-             * - authenticated delivery partner
-             * - partner assignment
-             * - order ownership
-             * - current delivery state
-             * - failure reason
-             * - reschedule rules
-             * - authorization
-             * - activity/audit logging
-             */
-
-            setIsSubmitted(true);
+          onPress: async () => {
+            setIsSubmitting(true);
+            try {
+              const reason = [
+                selectedReasonDetails?.title || selectedReason,
+                notes.trim(),
+              ].filter(Boolean).join(': ');
+              await failDelivery(deliveryId.replace(/^#/, ''), reason);
+              setIsSubmitted(true);
+            } catch (error) {
+              Alert.alert(
+                'Could not report delivery failure',
+                error instanceof Error ? error.message : 'Refresh the order and retry.',
+              );
+            } finally {
+              setIsSubmitting(false);
+            }
           },
         },
       ],
@@ -296,9 +300,7 @@ function FailedDeliveryScreen() {
                     : styles.headerBadgeTextFailed,
                 ]}
               >
-                {isReschedule
-                  ? 'RESCHEDULED'
-                  : 'FAILED'}
+                {isReschedule ? 'REPORTED' : 'FAILED'}
               </Text>
             </View>
           </View>
@@ -338,7 +340,7 @@ function FailedDeliveryScreen() {
               }
             >
               {isReschedule
-                ? 'Reschedule Request Recorded'
+                ? 'Delivery Attempt Reported'
                 : 'Delivery Marked as Failed'}
             </Text>
 
@@ -347,9 +349,7 @@ function FailedDeliveryScreen() {
                 styles.resultDescription
               }
             >
-              {isReschedule
-                ? 'The customer reschedule request has been recorded in the current frontend flow.'
-                : 'The delivery issue has been recorded in the current frontend flow.'}
+              The backend recorded this delivery attempt and returned the order to warehouse dispatch for the next step.
             </Text>
 
             <View
@@ -374,9 +374,7 @@ function FailedDeliveryScreen() {
                     : styles.resultStatusTextFailed,
                 ]}
               >
-                {isReschedule
-                  ? 'RESCHEDULE REQUEST'
-                  : 'DELIVERY FAILED'}
+                {isReschedule ? 'ATTEMPT REPORTED' : 'DELIVERY FAILED'}
               </Text>
             </View>
           </View>
@@ -494,7 +492,7 @@ function FailedDeliveryScreen() {
                 ]}
               >
                 {isReschedule
-                  ? 'Reschedule requested'
+                  ? 'Customer asked to reschedule'
                   : 'Delivery failed'}
               </Text>
             </View>
@@ -536,7 +534,7 @@ function FailedDeliveryScreen() {
                 styles.backendNoticeTitle
               }
             >
-              Backend integration comes next
+              DailyMart dispatch update
             </Text>
 
             <Text
@@ -544,10 +542,7 @@ function FailedDeliveryScreen() {
                 styles.backendNoticeText
               }
             >
-              The current screen simulates the frontend
-              result. Later, the backend will securely
-              validate and record the delivery failure or
-              reschedule request.
+              The delivery attempt was saved by the backend. A new delivery time is not set here; the warehouse dispatch team will decide the next step.
             </Text>
           </View>
 
@@ -945,8 +940,8 @@ function FailedDeliveryScreen() {
                 }
               >
                 {isReschedule
-                  ? 'This will submit a reschedule request instead of a final delivery failure.'
-                  : 'This will report the current delivery attempt as failed.'}
+                  ? 'This records the failed attempt and returns the order to warehouse dispatch.'
+                  : 'This reports the current delivery attempt as failed and returns the order to warehouse dispatch.'}
               </Text>
             </View>
           </View>
@@ -972,8 +967,8 @@ function FailedDeliveryScreen() {
               styles.primaryButtonText
             }
           >
-            {isReschedule
-              ? 'SUBMIT RESCHEDULE REQUEST'
+                {isReschedule
+                  ? 'REPORT ATTEMPT'
               : 'REPORT FAILED DELIVERY'}
           </Text>
         </Pressable>

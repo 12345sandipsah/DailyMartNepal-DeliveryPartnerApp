@@ -1,4 +1,13 @@
 import React from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
+import {
+  faArrowLeft,
+  faBell,
+  faMoneyBillWave,
+  faTruck,
+  faWarehouse,
+  faChevronRight,
+} from '@fortawesome/free-solid-svg-icons';
 
 import {
   Pressable,
@@ -9,30 +18,26 @@ import {
   View,
 } from 'react-native';
 
-import {
-  useNavigation,
-  useRoute,
-} from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 
-import type {
-  NativeStackNavigationProp,
-} from '@react-navigation/native-stack';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import type {
-  RouteProp,
-} from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 
-import type {
-  MainStackParamList,
-} from '../../../app/navigation/MainNavigator';
+import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
 
 type NotificationDetailsParams = {
   NotificationDetails: {
     title: string;
+
     message: string;
+
     time: string;
+
     type: 'DELIVERY' | 'PICKUP' | 'PAYMENT' | 'SYSTEM';
+
     deliveryId?: string;
+
     read: boolean;
   };
 };
@@ -68,22 +73,17 @@ const getTypeLabel = (
 
 const getTypeIcon = (
   type: NotificationDetailsParams['NotificationDetails']['type'],
-): string => {
+) => {
   switch (type) {
     case 'DELIVERY':
-      return 'D';
-
+      return faTruck;
     case 'PICKUP':
-      return 'P';
-
+      return faWarehouse;
     case 'PAYMENT':
-      return '₹';
-
+      return faMoneyBillWave;
     case 'SYSTEM':
-      return 'S';
-
     default:
-      return 'N';
+      return faBell;
   }
 };
 
@@ -109,18 +109,21 @@ const getTypeColor = (
 };
 
 const NotificationDetailsScreen = () => {
-  const navigation =
-    useNavigation<NotificationDetailsNavigationProp>();
+  const navigation = useNavigation<NotificationDetailsNavigationProp>();
 
-  const route =
-    useRoute<NotificationDetailsRouteProp>();
+  const route = useRoute<NotificationDetailsRouteProp>();
 
   const {
     title,
+
     message,
+
     time,
+
     type,
+
     deliveryId,
+
     read,
   } = route.params;
 
@@ -136,18 +139,21 @@ const NotificationDetailsScreen = () => {
         navigation.navigate('DeliveryDetails', {
           deliveryId,
         });
+
         break;
 
       case 'PICKUP':
         navigation.navigate('WarehousePickup', {
           deliveryId,
         });
+
         break;
 
       case 'PAYMENT':
-        navigation.navigate('CODCollection', {
+        navigation.navigate('DeliveryVerification', {
           deliveryId,
         });
+
         break;
 
       case 'SYSTEM':
@@ -160,9 +166,7 @@ const NotificationDetailsScreen = () => {
 
   const showRelatedAction =
     deliveryId !== undefined &&
-    (type === 'DELIVERY' ||
-      type === 'PICKUP' ||
-      type === 'PAYMENT');
+    (type === 'DELIVERY' || type === 'PICKUP' || type === 'PAYMENT');
 
   const getActionLabel = (): string => {
     switch (type) {
@@ -173,7 +177,7 @@ const NotificationDetailsScreen = () => {
         return 'Open Pickup';
 
       case 'PAYMENT':
-        return 'Open COD Collection';
+        return 'Verify Delivery & Payment';
 
       default:
         return '';
@@ -188,24 +192,25 @@ const NotificationDetailsScreen = () => {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
             accessibilityRole="button"
-            accessibilityLabel="Go back">
-            <Text style={styles.backArrow}>‹</Text>
+            accessibilityLabel="Go back"
+          >
+            <FontAwesomeIcon icon={faArrowLeft} size={18} color="#1F2937" />
           </Pressable>
 
-          <Text style={styles.headerTitle}>
-            Notification Details
-          </Text>
+          <Text style={styles.headerTitle}>Notification Details</Text>
 
           <View style={styles.headerSpacer} />
         </View>
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}>
+          contentContainerStyle={styles.scrollContent}
+        >
           <View style={styles.iconSection}>
             <View
               style={[
                 styles.iconContainer,
+
                 {
                   backgroundColor:
                     type === 'DELIVERY'
@@ -216,21 +221,19 @@ const NotificationDetailsScreen = () => {
                       ? '#FFF8E1'
                       : '#F3E5F5',
                 },
-              ]}>
-              <Text
-                style={[
-                  styles.notificationIcon,
-                  {
-                    color: typeColor,
-                  },
-                ]}>
-                {getTypeIcon(type)}
-              </Text>
+              ]}
+            >
+              <FontAwesomeIcon
+                icon={getTypeIcon(type)}
+                size={28}
+                color={typeColor}
+              />
             </View>
 
             <View
               style={[
                 styles.typeBadge,
+
                 {
                   backgroundColor:
                     type === 'DELIVERY'
@@ -241,14 +244,17 @@ const NotificationDetailsScreen = () => {
                       ? '#FFF8E1'
                       : '#F3E5F5',
                 },
-              ]}>
+              ]}
+            >
               <Text
                 style={[
                   styles.typeBadgeText,
+
                   {
                     color: typeColor,
                   },
-                ]}>
+                ]}
+              >
                 {getTypeLabel(type)}
               </Text>
             </View>
@@ -264,24 +270,22 @@ const NotificationDetailsScreen = () => {
             <Text style={styles.message}>{message}</Text>
 
             <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>
-                Notification Status
-              </Text>
+              <Text style={styles.statusLabel}>Notification Status</Text>
 
               <View
                 style={[
                   styles.statusBadge,
-                  read
-                    ? styles.statusBadgeRead
-                    : styles.statusBadgeUnread,
-                ]}>
+
+                  read ? styles.statusBadgeRead : styles.statusBadgeUnread,
+                ]}
+              >
                 <Text
                   style={[
                     styles.statusText,
-                    read
-                      ? styles.statusTextRead
-                      : styles.statusTextUnread,
-                  ]}>
+
+                    read ? styles.statusTextRead : styles.statusTextUnread,
+                  ]}
+                >
                   {read ? 'READ' : 'UNREAD'}
                 </Text>
               </View>
@@ -290,18 +294,12 @@ const NotificationDetailsScreen = () => {
 
           {deliveryId && (
             <View style={styles.orderCard}>
-              <Text style={styles.sectionTitle}>
-                Related Delivery
-              </Text>
+              <Text style={styles.sectionTitle}>Related Delivery</Text>
 
               <View style={styles.orderRow}>
-                <Text style={styles.orderLabel}>
-                  Order ID
-                </Text>
+                <Text style={styles.orderLabel}>Order ID</Text>
 
-                <Text style={styles.orderValue}>
-                  #{deliveryId}
-                </Text>
+                <Text style={styles.orderValue}>#{deliveryId}</Text>
               </View>
             </View>
           )}
@@ -311,26 +309,26 @@ const NotificationDetailsScreen = () => {
               style={styles.actionButton}
               onPress={handleRelatedAction}
               accessibilityRole="button"
-              accessibilityLabel={getActionLabel()}>
-              <Text style={styles.actionButtonText}>
-                {getActionLabel()}
-              </Text>
+              accessibilityLabel={getActionLabel()}
+            >
+              <Text style={styles.actionButtonText}>{getActionLabel()}</Text>
 
-              <Text style={styles.actionButtonArrow}>
-                ›
-              </Text>
+              <FontAwesomeIcon
+                icon={faChevronRight}
+                size={15}
+                color="#FFFFFF"
+                style={styles.actionButtonArrow}
+              />
             </Pressable>
           )}
 
           <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>
-              Notification Information
-            </Text>
+            <Text style={styles.infoTitle}>Notification Information</Text>
 
             <Text style={styles.infoText}>
-              This notification is part of your DailyMart Nepal
-              delivery operations. Important delivery, pickup,
-              payment, and system updates will appear here.
+              This notification is part of your DailyMart Nepal delivery
+              operations. Important delivery, pickup, payment, and system
+              updates will appear here.
             </Text>
           </View>
 
@@ -344,6 +342,7 @@ const NotificationDetailsScreen = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
+
     backgroundColor: '#F7F9F7',
   },
 
@@ -353,35 +352,43 @@ const styles = StyleSheet.create({
 
   header: {
     minHeight: 64,
+
     flexDirection: 'row',
+
     alignItems: 'center',
+
     justifyContent: 'space-between',
+
     paddingHorizontal: 16,
+
     backgroundColor: '#FFFFFF',
+
     borderBottomWidth: 1,
+
     borderBottomColor: '#E5EAE5',
   },
 
   backButton: {
     width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 
-  backArrow: {
-    fontSize: 32,
-    lineHeight: 32,
-    color: '#1F2937',
-    fontWeight: '400',
+    height: 42,
+
+    borderRadius: 21,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
   },
 
   headerTitle: {
     flex: 1,
+
     textAlign: 'center',
+
     fontSize: 18,
+
     fontWeight: '700',
+
     color: '#1F2937',
   },
 
@@ -391,93 +398,123 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingHorizontal: 16,
+
     paddingTop: 20,
+
     paddingBottom: 30,
   },
 
   iconSection: {
     alignItems: 'center',
+
     marginBottom: 18,
   },
 
   iconContainer: {
     width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 
-  notificationIcon: {
-    fontSize: 28,
-    fontWeight: '800',
+    height: 72,
+
+    borderRadius: 36,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
   },
 
   typeBadge: {
     marginTop: 12,
+
     paddingHorizontal: 12,
+
     paddingVertical: 6,
+
     borderRadius: 14,
   },
 
   typeBadgeText: {
     fontSize: 10,
+
     fontWeight: '800',
+
     letterSpacing: 0.8,
   },
 
   mainCard: {
     backgroundColor: '#FFFFFF',
+
     borderRadius: 18,
+
     borderWidth: 1,
+
     borderColor: '#E5EAE5',
+
     padding: 20,
   },
 
   title: {
     fontSize: 21,
+
     lineHeight: 28,
+
     fontWeight: '700',
+
     color: '#1F2937',
   },
 
   time: {
     marginTop: 7,
+
     fontSize: 12,
+
     color: '#9CA3AF',
   },
 
   divider: {
     height: 1,
+
     backgroundColor: '#EEF0EE',
+
     marginVertical: 18,
   },
 
   message: {
     fontSize: 15,
+
     lineHeight: 23,
+
     color: '#4B5563',
   },
 
   statusRow: {
     marginTop: 22,
+
     paddingTop: 16,
+
     borderTopWidth: 1,
+
     borderTopColor: '#EEF0EE',
+
     flexDirection: 'row',
+
     alignItems: 'center',
+
     justifyContent: 'space-between',
   },
 
   statusLabel: {
     fontSize: 13,
+
     fontWeight: '600',
+
     color: '#6B7280',
   },
 
   statusBadge: {
     paddingHorizontal: 10,
+
     paddingVertical: 5,
+
     borderRadius: 12,
   },
 
@@ -491,7 +528,9 @@ const styles = StyleSheet.create({
 
   statusText: {
     fontSize: 9,
+
     fontWeight: '800',
+
     letterSpacing: 0.6,
   },
 
@@ -505,80 +544,109 @@ const styles = StyleSheet.create({
 
   orderCard: {
     marginTop: 14,
+
     backgroundColor: '#FFFFFF',
+
     borderRadius: 16,
+
     borderWidth: 1,
+
     borderColor: '#E5EAE5',
+
     padding: 18,
   },
 
   sectionTitle: {
     fontSize: 15,
+
     fontWeight: '700',
+
     color: '#1F2937',
+
     marginBottom: 14,
   },
 
   orderRow: {
     flexDirection: 'row',
+
     alignItems: 'center',
+
     justifyContent: 'space-between',
   },
 
   orderLabel: {
     fontSize: 13,
+
     color: '#6B7280',
   },
 
   orderValue: {
     fontSize: 14,
+
     fontWeight: '700',
+
     color: '#2E7D32',
   },
 
   actionButton: {
     marginTop: 14,
+
     minHeight: 52,
+
     borderRadius: 12,
+
     backgroundColor: '#2E7D32',
+
     paddingHorizontal: 18,
+
     flexDirection: 'row',
+
     alignItems: 'center',
+
     justifyContent: 'center',
   },
 
   actionButtonText: {
     fontSize: 14,
+
     fontWeight: '700',
+
     color: '#FFFFFF',
   },
 
   actionButtonArrow: {
     marginLeft: 8,
-    fontSize: 22,
-    lineHeight: 22,
-    color: '#FFFFFF',
   },
 
   infoCard: {
     marginTop: 14,
+
     backgroundColor: '#F0F7F0',
+
     borderRadius: 16,
+
     borderWidth: 1,
+
     borderColor: '#D8EAD8',
+
     padding: 16,
   },
 
   infoTitle: {
     fontSize: 13,
+
     fontWeight: '700',
+
     color: '#1F2937',
+
     marginBottom: 6,
   },
 
   infoText: {
     fontSize: 12,
+
     lineHeight: 19,
+
     color: '#667066',
   },
 

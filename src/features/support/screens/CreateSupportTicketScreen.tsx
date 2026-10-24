@@ -1,4 +1,5 @@
-import React, {useState} from 'react';
+
+import React, {useRef, useState} from 'react';
 
 import {
   Alert,
@@ -12,25 +13,30 @@ import {
 } from 'react-native';
 
 import {useNavigation} from '@react-navigation/native';
+import {FontAwesomeIcon} from '@fortawesome/react-native-fontawesome';
+import {
+  faArrowLeft,
+  faChevronDown,
+  faChevronUp,
+  faCheck,
+  faCircleInfo,
+} from '@fortawesome/free-solid-svg-icons';
 
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
 
-import {
-  useSupportTickets,
-} from '../context/SupportTicketContext';
+import {useSupportTickets} from '../context/SupportTicketContext';
 
 import type {
   TicketCategory,
   TicketPriority,
 } from '../context/SupportTicketContext';
 
-type CreateSupportTicketNavigationProp =
-  NativeStackNavigationProp<
-    MainStackParamList,
-    'CreateSupportTicket'
-  >;
+type CreateSupportTicketNavigationProp = NativeStackNavigationProp<
+  MainStackParamList,
+  'CreateSupportTicket'
+>;
 
 const CATEGORIES: TicketCategory[] = [
   'Delivery',
@@ -52,7 +58,7 @@ const CreateSupportTicketScreen = () => {
   const navigation =
     useNavigation<CreateSupportTicketNavigationProp>();
 
-  const {addTicket} = useSupportTickets();
+  const {addTicket, isLoaded} = useSupportTickets();
 
   const [category, setCategory] =
     useState<TicketCategory>('Delivery');
@@ -61,28 +67,26 @@ const CreateSupportTicketScreen = () => {
     useState<TicketPriority>('NORMAL');
 
   const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const [orderReference, setOrderReference] = useState('');
 
-  const [description, setDescription] =
-    useState('');
+  const [showCategories, setShowCategories] = useState(false);
+  const [showPriorities, setShowPriorities] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [orderReference, setOrderReference] =
-    useState('');
-
-  const [showCategories, setShowCategories] =
-    useState(false);
-
-  const [showPriorities, setShowPriorities] =
-    useState(false);
+  // Prevent repeated submissions before React updates the UI.
+  const submitLockRef = useRef(false);
 
   const handleSubmit = () => {
+    if (submitLockRef.current || !isLoaded) {
+      return;
+    }
+
     const trimmedSubject = subject.trim();
+    const trimmedDescription = description.trim();
+    const trimmedOrderReference = orderReference.trim();
 
-    const trimmedDescription =
-      description.trim();
-
-    const trimmedOrderReference =
-      orderReference.trim();
-
+    // Validate subject.
     if (!trimmedSubject) {
       Alert.alert(
         'Subject Required',
@@ -99,6 +103,7 @@ const CreateSupportTicketScreen = () => {
       return;
     }
 
+    // Validate description.
     if (!trimmedDescription) {
       Alert.alert(
         'Description Required',
@@ -115,35 +120,51 @@ const CreateSupportTicketScreen = () => {
       return;
     }
 
-    const createdTicket = addTicket({
-      category,
-      priority,
-      subject: trimmedSubject,
-      description: trimmedDescription,
-      orderReference:
-        trimmedOrderReference || undefined,
-    });
+    submitLockRef.current = true;
+    setIsSubmitting(true);
 
-    Alert.alert(
-      'Support Ticket Created',
-      `Your support ticket ${createdTicket.id} has been created successfully.`,
-      [
-        {
-          text: 'View Ticket',
-          onPress: () => {
-            navigation.replace('SupportTicketDetails', {
-              ticketId: createdTicket.id,
-            });
+    try {
+      const createdTicket = addTicket({
+        category,
+        priority,
+        subject: trimmedSubject,
+        description: trimmedDescription,
+        orderReference: trimmedOrderReference || undefined,
+      });
+
+      Alert.alert(
+        'Support Ticket Created',
+        `Your support ticket ${createdTicket.id} has been created successfully.`,
+        [
+          {
+            text: 'View Ticket',
+            onPress: () => {
+              navigation.replace('SupportTicketDetails', {
+                ticketId: createdTicket.id,
+              });
+            },
           },
-        },
-        {
-          text: 'My Tickets',
-          onPress: () => {
-            navigation.replace('SupportTickets');
+          {
+            text: 'My Tickets',
+            onPress: () => {
+              navigation.replace('SupportTickets');
+            },
           },
+        ],
+        {
+          cancelable: false,
         },
-      ],
-    );
+      );
+    } catch {
+      // Allow retry if ticket creation itself fails.
+      submitLockRef.current = false;
+      setIsSubmitting(false);
+
+      Alert.alert(
+        'Unable to Create Ticket',
+        'Your support ticket could not be created. Please try again.',
+      );
+    }
   };
 
   return (
@@ -155,7 +176,11 @@ const CreateSupportTicketScreen = () => {
             onPress={() => navigation.goBack()}
             accessibilityRole="button"
             accessibilityLabel="Go back">
-            <Text style={styles.backArrow}>‹</Text>
+            <FontAwesomeIcon
+              icon={faArrowLeft}
+              size={18}
+              color="#1F2937"
+            />
           </Pressable>
 
           <Text style={styles.headerTitle}>
@@ -181,16 +206,12 @@ const CreateSupportTicketScreen = () => {
           </View>
 
           <View style={styles.formSection}>
-            <Text style={styles.label}>
-              Issue Category
-            </Text>
+            <Text style={styles.label}>Issue Category</Text>
 
             <Pressable
               style={styles.selectButton}
               onPress={() =>
-                setShowCategories(
-                  previous => !previous,
-                )
+                setShowCategories(previous => !previous)
               }
               accessibilityRole="button"
               accessibilityLabel="Select issue category">
@@ -198,9 +219,11 @@ const CreateSupportTicketScreen = () => {
                 {category}
               </Text>
 
-              <Text style={styles.selectArrow}>
-                {showCategories ? '⌃' : '⌄'}
-              </Text>
+              <FontAwesomeIcon
+                icon={showCategories ? faChevronUp : faChevronDown}
+                size={15}
+                color="#2E7D32"
+              />
             </Pressable>
 
             {showCategories && (
@@ -210,8 +233,7 @@ const CreateSupportTicketScreen = () => {
                     key={item}
                     style={[
                       styles.dropdownItem,
-                      item === category &&
-                        styles.dropdownItemActive,
+                      item === category && styles.dropdownItemActive,
                     ]}
                     onPress={() => {
                       setCategory(item);
@@ -227,9 +249,11 @@ const CreateSupportTicketScreen = () => {
                     </Text>
 
                     {item === category && (
-                      <Text style={styles.checkMark}>
-                        ✓
-                      </Text>
+                      <FontAwesomeIcon
+                        icon={faCheck}
+                        size={13}
+                        color="#2E7D32"
+                      />
                     )}
                   </Pressable>
                 ))}
@@ -238,16 +262,12 @@ const CreateSupportTicketScreen = () => {
           </View>
 
           <View style={styles.formSection}>
-            <Text style={styles.label}>
-              Priority
-            </Text>
+            <Text style={styles.label}>Priority</Text>
 
             <Pressable
               style={styles.selectButton}
               onPress={() =>
-                setShowPriorities(
-                  previous => !previous,
-                )
+                setShowPriorities(previous => !previous)
               }
               accessibilityRole="button"
               accessibilityLabel="Select support priority">
@@ -255,9 +275,11 @@ const CreateSupportTicketScreen = () => {
                 {priority}
               </Text>
 
-              <Text style={styles.selectArrow}>
-                {showPriorities ? '⌃' : '⌄'}
-              </Text>
+              <FontAwesomeIcon
+                icon={showPriorities ? faChevronUp : faChevronDown}
+                size={15}
+                color="#2E7D32"
+              />
             </Pressable>
 
             {showPriorities && (
@@ -267,8 +289,7 @@ const CreateSupportTicketScreen = () => {
                     key={item}
                     style={[
                       styles.dropdownItem,
-                      item === priority &&
-                        styles.dropdownItemActive,
+                      item === priority && styles.dropdownItemActive,
                     ]}
                     onPress={() => {
                       setPriority(item);
@@ -284,9 +305,11 @@ const CreateSupportTicketScreen = () => {
                     </Text>
 
                     {item === priority && (
-                      <Text style={styles.checkMark}>
-                        ✓
-                      </Text>
+                      <FontAwesomeIcon
+                        icon={faCheck}
+                        size={13}
+                        color="#2E7D32"
+                      />
                     )}
                   </Pressable>
                 ))}
@@ -307,6 +330,7 @@ const CreateSupportTicketScreen = () => {
               placeholderTextColor="#9CA3AF"
               autoCapitalize="characters"
               returnKeyType="next"
+              editable={!isSubmitting}
             />
 
             <Text style={styles.helperText}>
@@ -316,9 +340,7 @@ const CreateSupportTicketScreen = () => {
           </View>
 
           <View style={styles.formSection}>
-            <Text style={styles.label}>
-              Subject
-            </Text>
+            <Text style={styles.label}>Subject</Text>
 
             <TextInput
               style={styles.input}
@@ -328,6 +350,7 @@ const CreateSupportTicketScreen = () => {
               placeholderTextColor="#9CA3AF"
               maxLength={100}
               returnKeyType="next"
+              editable={!isSubmitting}
             />
 
             <Text style={styles.characterCount}>
@@ -336,9 +359,7 @@ const CreateSupportTicketScreen = () => {
           </View>
 
           <View style={styles.formSection}>
-            <Text style={styles.label}>
-              Description
-            </Text>
+            <Text style={styles.label}>Description</Text>
 
             <TextInput
               style={[
@@ -352,6 +373,7 @@ const CreateSupportTicketScreen = () => {
               multiline
               textAlignVertical="top"
               maxLength={500}
+              editable={!isSubmitting}
             />
 
             <Text style={styles.characterCount}>
@@ -361,9 +383,11 @@ const CreateSupportTicketScreen = () => {
 
           <View style={styles.guidanceCard}>
             <View style={styles.guidanceIcon}>
-              <Text style={styles.guidanceIconText}>
-                i
-              </Text>
+              <FontAwesomeIcon
+                icon={faCircleInfo}
+                size={14}
+                color="#FFFFFF"
+              />
             </View>
 
             <View style={styles.guidanceContent}>
@@ -380,12 +404,21 @@ const CreateSupportTicketScreen = () => {
           </View>
 
           <Pressable
-            style={styles.submitButton}
+            style={[
+              styles.submitButton,
+              (isSubmitting || !isLoaded) &&
+                styles.submitButtonDisabled,
+            ]}
             onPress={handleSubmit}
+            disabled={isSubmitting || !isLoaded}
             accessibilityRole="button"
             accessibilityLabel="Submit support ticket">
             <Text style={styles.submitButtonText}>
-              Submit Support Ticket
+              {!isLoaded
+                ? 'Loading Tickets...'
+                : isSubmitting
+                  ? 'Submitting...'
+                  : 'Submit Support Ticket'}
             </Text>
           </Pressable>
 
@@ -393,7 +426,8 @@ const CreateSupportTicketScreen = () => {
             style={styles.cancelButton}
             onPress={() => navigation.goBack()}
             accessibilityRole="button"
-            accessibilityLabel="Cancel support ticket">
+            accessibilityLabel="Cancel support ticket"
+            disabled={isSubmitting}>
             <Text style={styles.cancelButtonText}>
               Cancel
             </Text>
@@ -433,12 +467,6 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  backArrow: {
-    fontSize: 32,
-    lineHeight: 32,
-    color: '#1F2937',
   },
 
   headerTitle: {
@@ -549,12 +577,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  checkMark: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#2E7D32',
-  },
-
   input: {
     minHeight: 50,
     paddingHorizontal: 15,
@@ -605,12 +627,6 @@ const styles = StyleSheet.create({
     marginRight: 11,
   },
 
-  guidanceIconText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-
   guidanceContent: {
     flex: 1,
   },
@@ -634,6 +650,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#2E7D32',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  submitButtonDisabled: {
+    opacity: 0.6,
   },
 
   submitButtonText: {
