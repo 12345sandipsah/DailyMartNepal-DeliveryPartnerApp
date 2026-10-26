@@ -1,0 +1,37 @@
+name: Android preview APK
+
+on:
+  push:
+    branches:
+      - staging
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DAILYMART_API_BASE_URL: ${{ vars.DAILYMART_API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: npm ci
+      - name: Set the staging API URL
+        run: node scripts/write-api-origin.js
+      - name: Build signed test APK
+        run: ./gradlew --no-daemon assembleRelease
+        working-directory: android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dailymart-rider-android-preview
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {Platform} from 'react-native';
+import {API_ORIGIN} from '../config/apiOrigin';
 
 const TOKEN_KEY = 'dailymart.deliveryPartnerToken';
 const configuredBaseUrl = (
@@ -10,6 +11,7 @@ const configuredBaseUrl = (
 const developmentHostOverride = '';
 const API_BASE_URL = (
   configuredBaseUrl?.trim() ||
+  API_ORIGIN.trim() ||
   developmentHostOverride ||
   (Platform.OS === 'android'
     ? 'http://10.0.2.2:5000'
