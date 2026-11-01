@@ -419,13 +419,7 @@ function DeliveryDetailsScreen({ route }: DeliveryDetailsScreenProps) {
 
           <Pressable
             style={styles.helpButton}
-            onPress={() =>
-              Alert.alert(
-                'Help',
-
-                'Help support will be connected later.',
-              )
-            }
+            onPress={() => navigation.navigate('Support')}
           >
             <FontAwesomeIcon
               icon={faCircleQuestion}
@@ -481,37 +475,7 @@ function DeliveryDetailsScreen({ route }: DeliveryDetailsScreenProps) {
           </View>
 
           <View style={styles.deliveryNumberRow}>
-            <Pressable
-              style={styles.deliveryArrowButton}
-              onPress={() =>
-                Alert.alert(
-                  'Navigation unavailable',
-
-                  'Previous delivery navigation will be connected later.',
-                )
-              }
-            >
-              <FontAwesomeIcon icon={faChevronLeft} size={12} color="#727A78" />
-            </Pressable>
-
-              <Text style={styles.deliveryNumberText}>Single order delivery</Text>
-
-            <Pressable
-              style={styles.deliveryArrowButton}
-              onPress={() =>
-                Alert.alert(
-                  'Navigation unavailable',
-
-                  'Next delivery navigation will be connected later.',
-                )
-              }
-            >
-              <FontAwesomeIcon
-                icon={faChevronRight}
-                size={12}
-                color="#727A78"
-              />
-            </Pressable>
+            <Text style={styles.deliveryNumberText}>Single order delivery</Text>
           </View>
         </View>
 
@@ -931,13 +895,7 @@ function DeliveryDetailsScreen({ route }: DeliveryDetailsScreenProps) {
 
             <Pressable
               style={styles.reportIssueButton}
-              onPress={() =>
-                Alert.alert(
-                  'Report an Issue',
-
-                  'Delivery issue reporting will be connected next.',
-                )
-              }
+              onPress={() => navigation.navigate('CreateSupportTicket')}
             >
               <View style={styles.reportIconCircle}>
                 <FontAwesomeIcon

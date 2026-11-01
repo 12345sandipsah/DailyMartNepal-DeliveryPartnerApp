@@ -1,11 +1,14 @@
-import React from 'react';
+import React, {useState} from 'react';
 
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -24,6 +27,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import {
   faChevronLeft,
   faCircleExclamation,
+  faPaperPlane,
 } from '@fortawesome/free-solid-svg-icons';
 
 type TicketDetailsParams = {
@@ -85,8 +89,6 @@ const getPriorityStyles = (priority: TicketPriority) => {
         text: styles.priorityTextHigh,
       };
 
-    case 'NORMAL':
-
     default:
       return {
         badge: styles.priorityBadgeNormal,
@@ -101,7 +103,10 @@ const SupportTicketDetailsScreen = () => {
 
   const route = useRoute<TicketDetailsRouteProp>();
 
-  const { getTicketById } = useSupportTickets();
+  const { getTicketById, replyToTicket } = useSupportTickets();
+
+  const [reply, setReply] = useState('');
+  const [sending, setSending] = useState(false);
 
   const ticket = getTicketById(route.params.ticketId);
 
@@ -159,6 +164,23 @@ const SupportTicketDetailsScreen = () => {
   const statusStyles = getStatusStyles(ticket.status);
 
   const priorityStyles = getPriorityStyles(ticket.priority);
+
+  const handleSendReply = async () => {
+    const message = reply.trim();
+    if (!message || sending) return;
+    setSending(true);
+    try {
+      await replyToTicket(ticket.id, message);
+      setReply('');
+    } catch (error) {
+      Alert.alert(
+        'Message not sent',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -332,14 +354,54 @@ const SupportTicketDetailsScreen = () => {
 
           <View style={styles.responseCard}>
             <View style={styles.responseHeader}>
-              <Text style={styles.sectionTitle}>Latest Support Response</Text>
+              <Text style={styles.sectionTitle}>Latest ticket update</Text>
 
               <View style={styles.responseBadge}>
-                <Text style={styles.responseBadgeText}>SUPPORT</Text>
+                <Text style={styles.responseBadgeText}>UPDATE</Text>
               </View>
             </View>
 
             <Text style={styles.responseText}>{ticket.latestResponse}</Text>
+          </View>
+
+          <View style={styles.conversationCard}>
+            <Text style={styles.sectionTitle}>Ticket conversation</Text>
+            {ticket.messages.map(message => (
+              <View key={message.id} style={styles.messageItem}>
+                <View style={styles.messageMeta}>
+                  <Text style={styles.messageAuthor}>
+                    {message.authorType === 'delivery_partner'
+                      ? 'You'
+                      : message.authorType === 'admin'
+                        ? 'DailyMart Support'
+                        : message.authorName}
+                  </Text>
+                  <Text style={styles.messageTime}>{message.createdAt}</Text>
+                </View>
+                <Text style={styles.messageBody}>{message.body}</Text>
+              </View>
+            ))}
+            <View style={styles.replyRow}>
+              <TextInput
+                value={reply}
+                onChangeText={setReply}
+                placeholder="Write a message to support…"
+                placeholderTextColor="#9AA39C"
+                multiline
+                maxLength={4000}
+                style={styles.replyInput}
+              />
+              <Pressable
+                style={[styles.sendButton, (!reply.trim() || sending) && styles.sendButtonDisabled]}
+                disabled={!reply.trim() || sending}
+                onPress={handleSendReply}
+                accessibilityRole="button"
+                accessibilityLabel="Send message">
+                {sending ? <ActivityIndicator size="small" color="#FFFFFF" /> : (
+                  <FontAwesomeIcon icon={faPaperPlane} size={14} color="#FFFFFF" />
+                )}
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.bottomInfoCard}>
@@ -779,6 +841,79 @@ const styles = StyleSheet.create({
     borderWidth: 1,
 
     borderColor: '#D8EAD8',
+  },
+
+  conversationCard: {
+    marginBottom: 12,
+    padding: 13,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E3E9E3',
+    backgroundColor: '#FFFFFF',
+  },
+
+  messageItem: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#F7F9F7',
+  },
+
+  messageMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+
+  messageAuthor: {
+    color: '#526158',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  messageTime: {
+    color: '#99A29B',
+    fontSize: 9,
+  },
+
+  messageBody: {
+    marginTop: 6,
+    color: '#59675E',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+
+  replyRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+
+  replyInput: {
+    flex: 1,
+    minHeight: 42,
+    maxHeight: 100,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: '#E0E7E1',
+    borderRadius: 9,
+    color: '#36443A',
+    fontSize: 11,
+  },
+
+  sendButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: '#2E7D32',
+  },
+
+  sendButtonDisabled: {
+    opacity: 0.45,
   },
 
   responseHeader: {

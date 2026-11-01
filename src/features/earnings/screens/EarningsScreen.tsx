@@ -1,7 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import {
-  faArrowRight,
   faArrowTrendUp,
   faBell,
   faChevronDown,
@@ -12,7 +11,6 @@ import {
   faHouse,
   faList,
   faUser,
-  faWallet,
   faTruck,
 } from '@fortawesome/free-solid-svg-icons';
 import type { IconProp } from '@fortawesome/fontawesome-svg-core';
@@ -28,6 +26,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
+import {getPartnerEarnings} from '../../../shared/services/api';
+import type {PartnerEarnings} from '../../../shared/services/api';
+import {useProfile} from '../../profile/context/ProfileContext';
 
 // ======================================================
 // TYPES
@@ -87,16 +88,10 @@ type WeeklyBar = {
 };
 
 // ======================================================
-// No chart data is shown until partner payout reporting is available.
+// The payout ledger has no daily chart endpoint. Do not draw synthetic bars.
 // ======================================================
 
 const WEEKLY_BARS: WeeklyBar[] = [];
-
-// ======================================================
-// No transaction data is fabricated while the payout ledger is unavailable.
-// ======================================================
-
-const TRANSACTIONS: Transaction[] = [];
 
 // ======================================================
 // HELPERS
@@ -124,36 +119,61 @@ const getTransactionIcon = (type: TransactionType): IconProp => {
 
 const EarningsScreen = () => {
   const navigation = useNavigation<EarningsNavigationProp>();
+  const {profile} = useProfile();
+  const initials = profile.fullName.trim().split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'DP';
 
   const [selectedPeriod, setSelectedPeriod] =
     useState<PeriodType>('Transactions');
 
-  const [summaryPeriod, setSummaryPeriod] = useState('This Week');
+  const [summaryPeriod, setSummaryPeriod] = useState('This Month');
+  const [earnings, setEarnings] = useState<PartnerEarnings | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  const apiPeriod = summaryPeriod === 'Today'
+    ? 'today'
+    : summaryPeriod === 'This Week'
+      ? 'week'
+      : summaryPeriod === 'All Time'
+        ? 'all'
+        : 'month';
+
+  useEffect(() => {
+    let active = true;
+    setIsLoading(true);
+    setLoadError('');
+    getPartnerEarnings(apiPeriod)
+      .then(result => { if (active) setEarnings(result); })
+      .catch(error => {
+        if (active) setLoadError(error instanceof Error ? error.message : 'Unable to load confirmed payout records.');
+      })
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [apiPeriod]);
 
   // ----------------------------------------------------
-  // The backend has no driver payout ledger or rate configuration yet.
-  // Keep money fields unavailable until those values can be sourced safely.
-  const totalEarnings: number | null = null;
-  const deliveryEarnings: number | null = null;
-  const tips: number | null = null;
-  const bonuses: number | null = null;
-  const walletBalance: number | null = null;
-
-  // ----------------------------------------------------
-  // Keep filters empty until backend payout records are available.
-  // ----------------------------------------------------
-
   const filteredTransactions = useMemo(() => {
+    const ledgerRows: Transaction[] = (earnings?.transactions || []).map(transaction => ({
+      id: transaction.id,
+      type: 'delivery',
+      title: transaction.reference || transaction.transferReference || 'Delivery partner payout',
+      subtitle: [transaction.notes, transaction.transferReference && `Transfer: ${transaction.transferReference}`]
+        .filter(Boolean)
+        .join(' · ') || 'Recorded by DailyMart finance',
+      amount: transaction.amount,
+      label: 'Paid',
+      date: transaction.date,
+    }));
     if (selectedPeriod === 'Transactions') {
-      return TRANSACTIONS;
+      return ledgerRows;
     }
 
-    if (TRANSACTIONS.length === 0) {
+    if (ledgerRows.length === 0) {
       return [];
     }
 
     const newestTimestamp = Math.max(
-      ...TRANSACTIONS.map(transaction =>
+      ...ledgerRows.map(transaction =>
         new Date(transaction.date).getTime(),
       ),
     );
@@ -180,7 +200,7 @@ const EarningsScreen = () => {
     const startDate = new Date(newestDate);
     startDate.setDate(startDate.getDate() - daysBack);
 
-    return TRANSACTIONS.filter(transaction => {
+    return ledgerRows.filter(transaction => {
       const transactionDate = new Date(transaction.date);
       transactionDate.setHours(0, 0, 0, 0);
 
@@ -189,7 +209,9 @@ const EarningsScreen = () => {
         transactionDate <= newestDate
       );
     });
-  }, [selectedPeriod]);
+  }, [earnings, selectedPeriod]);
+
+  const totalEarnings = earnings?.paidOutInPeriod;
 
   // ----------------------------------------------------
   // NAVIGATION
@@ -229,6 +251,7 @@ const EarningsScreen = () => {
         text: 'This Month',
         onPress: () => setSummaryPeriod('This Month'),
       },
+      {text: 'All Time', onPress: () => setSummaryPeriod('All Time')},
       {
         text: 'Cancel',
         style: 'cancel',
@@ -237,17 +260,6 @@ const EarningsScreen = () => {
   };
 
   // ----------------------------------------------------
-  // WITHDRAWAL PLACEHOLDER
-  // No actual payout is initiated by this screen.
-  // ----------------------------------------------------
-
-  const handleWithdraw = () => {
-    Alert.alert(
-      'Payouts unavailable',
-      'DailyMart has not configured delivery-partner payout rates or a wallet ledger yet.',
-    );
-  };
-
   // ====================================================
   // RENDER
   // ====================================================
@@ -294,7 +306,7 @@ const EarningsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Open profile"
           >
-            <Text style={styles.avatarText}>SS</Text>
+            <Text style={styles.avatarText}>{initials}</Text>
             <View style={styles.onlineDot} />
           </Pressable>
         </View>
@@ -326,14 +338,16 @@ const EarningsScreen = () => {
           </Pressable>
         </View>
 
+        {loadError ? <Text style={styles.loadError}>{loadError}</Text> : null}
+
         {/* TOTAL EARNINGS */}
 
         <View style={styles.totalCard}>
           <View style={styles.totalCardLeft}>
-            <Text style={styles.totalLabel}>Total Earnings</Text>
+            <Text style={styles.totalLabel}>Paid out</Text>
 
             <Text style={styles.totalAmount}>
-              {totalEarnings === null ? 'NPR —' : formatNPR(totalEarnings)}
+              {isLoading || totalEarnings === undefined ? 'NPR —' : formatNPR(totalEarnings)}
             </Text>
 
             <View style={styles.growthRow}>
@@ -343,11 +357,11 @@ const EarningsScreen = () => {
                   size={11}
                   color="#078A45"
                 />
-                <Text style={styles.growthText}>—</Text>
+                <Text style={styles.growthText}>{isLoading ? '…' : String(earnings?.periodPayoutCount || 0)}</Text>
               </View>
 
               <Text style={styles.growthDescription}>
-                payout data unavailable
+                confirmed payouts
               </Text>
             </View>
           </View>
@@ -369,7 +383,7 @@ const EarningsScreen = () => {
                 </View>
               ))}
               {WEEKLY_BARS.length === 0 && (
-                <Text style={styles.emptyTransactionsText}>No payout data yet</Text>
+                <Text style={styles.emptyTransactionsText}>Ledger total</Text>
               )}
             </View>
           </View>
@@ -380,54 +394,21 @@ const EarningsScreen = () => {
         <View style={styles.summaryRow}>
           <SummaryCard
             type="delivery"
-            value={deliveryEarnings === null ? '—' : formatNPR(deliveryEarnings)}
-            label="Delivery Earnings"
+            value={earnings ? formatNPR(earnings.paidOutInPeriod) : '—'}
+            label="Paid this period"
           />
 
           <SummaryCard
             type="tip"
-            value={tips === null ? '—' : formatNPR(tips)}
-            label="Tips"
+            value={earnings ? String(earnings.periodPayoutCount) : '—'}
+            label="Transfers"
           />
 
           <SummaryCard
             type="bonus"
-            value={bonuses === null ? '—' : formatNPR(bonuses)}
-            label="Bonuses"
+            value={earnings ? formatNPR(earnings.paidOutAllTime) : '—'}
+            label="Paid all time"
           />
-        </View>
-
-        {/* WALLET BALANCE */}
-
-        <View style={styles.walletCard}>
-          <View style={styles.walletIcon}>
-            <FontAwesomeIcon
-              icon={faWallet}
-              size={21}
-              color="#078A45"
-            />
-          </View>
-
-          <View style={styles.walletInfo}>
-            <Text style={styles.walletLabel}>Wallet Balance</Text>
-            <Text style={styles.walletAmount}>
-              {walletBalance === null ? 'NPR —' : formatNPR(walletBalance)}
-            </Text>
-          </View>
-
-          <Pressable
-            style={styles.withdrawButton}
-            onPress={handleWithdraw}
-            accessibilityRole="button"
-            accessibilityLabel="View withdrawal options"
-          >
-            <Text style={styles.withdrawText}>Withdraw</Text>
-            <FontAwesomeIcon
-              icon={faArrowRight}
-              size={13}
-              color="#FFFFFF"
-            />
-          </Pressable>
         </View>
 
         {/* TRANSACTION PERIOD TABS */}
@@ -487,7 +468,7 @@ const EarningsScreen = () => {
           )}
         </View>
 
-        {/* DEMO DATA INFORMATION */}
+        {/* PAYOUT INFORMATION */}
 
         <View style={styles.infoCard}>
           <View style={styles.infoIcon}>
@@ -504,7 +485,7 @@ const EarningsScreen = () => {
             </Text>
 
             <Text style={styles.infoText}>
-              Delivery-partner payout rates, tips, bonuses, wallet balance and payout history are not configured in the backend yet. Money fields will appear after the payout rules and ledger are added.
+              Only completed payouts recorded by DailyMart finance appear here. {earnings?.payoutRateConfigured ? 'Your payout rate is configured.' : 'A wallet balance and self-service withdrawal are not enabled for this account.'}
             </Text>
           </View>
         </View>
@@ -1284,6 +1265,15 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 16,
     color: '#6B756D',
+  },
+
+  loadError: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 10,
+    color: '#B42318',
+    backgroundColor: '#FFF1F0',
+    fontSize: 12,
   },
 
   // Bottom navigation

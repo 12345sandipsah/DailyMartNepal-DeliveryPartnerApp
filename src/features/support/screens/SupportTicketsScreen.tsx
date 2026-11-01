@@ -28,14 +28,14 @@ import type {
   TicketStatus,
 } from '../context/SupportTicketContext';
 
-type FilterType = 'ALL' | 'OPEN' | 'IN PROGRESS' | 'RESOLVED';
+type FilterType = 'ALL' | 'OPEN' | 'IN PROGRESS' | 'WAITING FOR CUSTOMER' | 'RESOLVED' | 'CLOSED';
 
 type SupportTicketsNavigationProp = NativeStackNavigationProp<
   MainStackParamList,
   'SupportTickets'
 >;
 
-const FILTERS: FilterType[] = ['ALL', 'OPEN', 'IN PROGRESS', 'RESOLVED'];
+const FILTERS: FilterType[] = ['ALL', 'OPEN', 'IN PROGRESS', 'WAITING FOR CUSTOMER', 'RESOLVED', 'CLOSED'];
 
 const getPriorityStyle = (priority: TicketPriority) => {
   switch (priority) {
@@ -52,8 +52,6 @@ const getPriorityStyle = (priority: TicketPriority) => {
 
         text: styles.priorityTextHigh,
       };
-
-    case 'NORMAL':
 
     default:
       return {
@@ -87,6 +85,20 @@ const getStatusStyle = (status: TicketStatus) => {
         text: styles.statusTextResolved,
       };
 
+    case 'WAITING FOR CUSTOMER':
+      return {
+        container: styles.statusProgress,
+
+        text: styles.statusTextProgress,
+      };
+
+    case 'CLOSED':
+      return {
+        container: styles.statusResolved,
+
+        text: styles.statusTextResolved,
+      };
+
     default:
       return {
         container: styles.statusOpen,
@@ -107,8 +119,14 @@ const formatFilterLabel = (filter: FilterType): string => {
     case 'IN PROGRESS':
       return 'In Progress';
 
+    case 'WAITING FOR CUSTOMER':
+      return 'Waiting for you';
+
     case 'RESOLVED':
       return 'Resolved';
+
+    case 'CLOSED':
+      return 'Closed';
 
     default:
       return filter;

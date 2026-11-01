@@ -30,6 +30,7 @@ import EditProfileScreen from '../../features/profile/screens/EditProfileScreen'
 import DocumentsScreen from '../../features/profile/screens/DocumentsScreen';
 import DocumentDetailsScreen from '../../features/profile/screens/DocumentDetailsScreen';
 import UploadDocumentScreen from '../../features/profile/screens/UploadDocumentScreen';
+import VehicleDetailsScreen from '../../features/profile/screens/VehicleDetailsScreen';
 
 import EarningsScreen from '../../features/earnings/screens/EarningsScreen';
 import SettingsScreen from '../../features/settings/screens/SettingsScreen';
@@ -46,6 +47,7 @@ export type MainStackParamList = {
   Profile: undefined;
   EditProfile: undefined;
   Documents: undefined;
+  VehicleDetails: undefined;
   DocumentDetails: {documentId: string};
   UploadDocument: {documentId: string};
   Earnings: undefined;
@@ -102,6 +104,7 @@ const MainNavigator = ({onLogout}: MainNavigatorProps) => {
 
             <Stack.Screen name="EditProfile" component={EditProfileScreen} />
             <Stack.Screen name="Documents" component={DocumentsScreen} />
+            <Stack.Screen name="VehicleDetails" component={VehicleDetailsScreen} />
             <Stack.Screen
               name="DocumentDetails"
               component={DocumentDetailsScreen}
@@ -113,7 +116,15 @@ const MainNavigator = ({onLogout}: MainNavigatorProps) => {
 
             <Stack.Screen name="Earnings" component={EarningsScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
-            <Stack.Screen name="Security" component={SecurityScreen} />
+            <Stack.Screen
+              name="Security"
+              children={props => (
+                <SecurityScreen
+                  {...props}
+                  onLogout={onLogout}
+                />
+              )}
+            />
 
             <Stack.Screen name="Deliveries" component={DeliveriesScreen} />
             <Stack.Screen

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   ActivityIndicator,
@@ -100,13 +100,14 @@ function ActiveDeliveryScreen({
   const isCodOrder = String(deliveryOrder?.paymentMethod || '').toLowerCase() === 'cod';
   const customerLatitude = deliveryOrder?.deliveryLocation?.latitude;
   const customerLongitude = deliveryOrder?.deliveryLocation?.longitude;
-  const customerCoordinate =
+  const customerCoordinate = useMemo(() =>
     typeof customerLatitude === 'number' &&
     Number.isFinite(customerLatitude) &&
     typeof customerLongitude === 'number' &&
     Number.isFinite(customerLongitude)
       ? [customerLongitude, customerLatitude] as [number, number]
-      : null;
+      : null,
+  [customerLatitude, customerLongitude]);
 
   const cameraRef = useRef<React.ComponentRef<typeof Mapbox.Camera> | null>(
     null,
@@ -315,7 +316,7 @@ function ActiveDeliveryScreen({
         ? 'Open live navigation to calculate a route from your current GPS location.'
         : 'This order has no saved map coordinates. Use the delivery address and contact warehouse support if needed.',
     );
-  }, [customerLatitude, customerLongitude]);
+  }, [customerCoordinate, customerLatitude, customerLongitude]);
 
   const fitMapToDelivery = useCallback(() => {
     if (typeof customerLatitude !== 'number' || typeof customerLongitude !== 'number') return;

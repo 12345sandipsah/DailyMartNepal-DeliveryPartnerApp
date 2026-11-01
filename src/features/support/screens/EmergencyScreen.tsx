@@ -12,6 +12,10 @@ import {
 } from 'react-native';
 
 import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
+import {useSupportTickets} from '../context/SupportTicketContext';
+import type {SupportTicket} from '../context/SupportTicketContext';
 
 type EmergencyType =
   | 'Safety Emergency'
@@ -31,7 +35,8 @@ const EMERGENCY_TYPES: EmergencyType[] = [
 ];
 
 const EmergencyScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const {addTicket} = useSupportTickets();
 
   const [selectedType, setSelectedType] =
     useState<EmergencyType>('Safety Emergency');
@@ -47,6 +52,12 @@ const EmergencyScreen = () => {
   const [isEmergencyActive, setIsEmergencyActive] =
     useState(false);
 
+  const [activeTicket, setActiveTicket] =
+    useState<SupportTicket | null>(null);
+
+  const [submitting, setSubmitting] =
+    useState(false);
+
   const handleActivateEmergency = () => {
     Alert.alert(
       'Confirm Emergency',
@@ -59,28 +70,35 @@ const EmergencyScreen = () => {
         {
           text: 'Activate SOS',
           style: 'destructive',
-          onPress: () => {
-            setIsEmergencyActive(true);
-          },
-        },
-      ],
-    );
-  };
-
-  const handleCancelEmergency = () => {
-    Alert.alert(
-      'Cancel Emergency',
-      'Are you sure you want to cancel the current emergency alert?',
-      [
-        {
-          text: 'Keep Active',
-          style: 'cancel',
-        },
-        {
-          text: 'Cancel Emergency',
-          style: 'destructive',
-          onPress: () => {
-            setIsEmergencyActive(false);
+          onPress: async () => {
+            setSubmitting(true);
+            try {
+              const ticket = await addTicket({
+                category: 'Safety / Emergency',
+                priority: 'URGENT',
+                subject: `${selectedType} — delivery partner SOS`,
+                description: [
+                  `Emergency type: ${selectedType}.`,
+                  orderReference.trim()
+                    ? `Related order: ${orderReference.trim()}.`
+                    : '',
+                  notes.trim() || 'No additional details were provided.',
+                ].filter(Boolean).join('\n'),
+                orderReference: orderReference.trim() || undefined,
+                isEmergency: true,
+              });
+              setActiveTicket(ticket);
+              setIsEmergencyActive(true);
+            } catch (error) {
+              Alert.alert(
+                'SOS could not be sent',
+                error instanceof Error
+                  ? error.message
+                  : 'Check your connection and try again.',
+              );
+            } finally {
+              setSubmitting(false);
+            }
           },
         },
       ],
@@ -119,10 +137,9 @@ const EmergencyScreen = () => {
             </Text>
 
             <Text style={styles.activeDescription}>
-              Your emergency request has been recorded in this
-              frontend demo. In the production system, this event
-              will be sent to the DailyMart Nepal operations and
-              emergency support system.
+              Your SOS has been recorded as an urgent DailyMart support ticket.
+              If anyone is in immediate danger, contact local emergency services
+              first; this in-app ticket is not an emergency services replacement.
             </Text>
 
             <View style={styles.activeCard}>
@@ -133,10 +150,17 @@ const EmergencyScreen = () => {
 
                 <View style={styles.activeStatusBadge}>
                   <Text style={styles.activeStatusText}>
-                    ACTIVE
+                    URGENT
                   </Text>
                 </View>
               </View>
+
+              {activeTicket && (
+                <View style={styles.activeDetailRow}>
+                  <Text style={styles.activeDetailLabel}>Support Ticket</Text>
+                  <Text style={styles.activeDetailValue}>{activeTicket.id}</Text>
+                </View>
+              )}
 
               <View style={styles.activeDivider} />
 
@@ -181,20 +205,25 @@ const EmergencyScreen = () => {
               </Text>
 
               <Text style={styles.warningText}>
-                In the production app, emergency handling will
-                require backend confirmation, partner identity,
-                current delivery information, location handling,
-                and an auditable emergency event.
+                Your ticket includes your saved delivery partner location when
+                the app has a recent location on record. Share your location
+                with emergency responders directly when needed.
               </Text>
             </View>
 
             <Pressable
               style={styles.cancelEmergencyButton}
-              onPress={handleCancelEmergency}
+              onPress={() => {
+                if (activeTicket) {
+                  navigation.navigate('SupportTicketDetails', {
+                    ticketId: activeTicket.id,
+                  });
+                }
+              }}
               accessibilityRole="button"
-              accessibilityLabel="Cancel active emergency">
+              accessibilityLabel="View emergency support ticket">
               <Text style={styles.cancelEmergencyButtonText}>
-                Cancel Emergency
+                View support ticket
               </Text>
             </Pressable>
 
@@ -379,10 +408,11 @@ const EmergencyScreen = () => {
           <Pressable
             style={styles.activateButton}
             onPress={handleActivateEmergency}
+            disabled={submitting}
             accessibilityRole="button"
             accessibilityLabel="Activate emergency SOS">
             <Text style={styles.activateButtonText}>
-              Activate Emergency / SOS
+              {submitting ? 'Sending SOS…' : 'Activate Emergency / SOS'}
             </Text>
           </Pressable>
 
@@ -813,7 +843,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#D32F2F',
+    borderColor: '#D8E7DA',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -821,7 +851,7 @@ const styles = StyleSheet.create({
   cancelEmergencyButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#D32F2F',
+    color: '#2E7D32',
   },
 
   bottomSpacing: {

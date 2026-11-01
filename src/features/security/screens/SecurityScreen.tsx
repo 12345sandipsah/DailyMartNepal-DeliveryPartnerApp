@@ -1,455 +1,211 @@
-
-import React, {useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
+import {
+  changePartnerPassword,
+  getPartnerLoginActivity,
+  logoutPartner,
+  revokePartnerSessions,
+} from '../../../shared/services/api';
+import type {PartnerLoginActivity} from '../../../shared/services/api';
 
-type SecurityNavigationProp = NativeStackNavigationProp<
-  MainStackParamList,
-  'Security'
->;
+type SecurityNavigationProp = NativeStackNavigationProp<MainStackParamList, 'Security'>;
+type SecurityScreenProps = {onLogout: () => void};
 
-const SecurityScreen = () => {
+const SecurityScreen = ({onLogout}: SecurityScreenProps) => {
   const navigation = useNavigation<SecurityNavigationProp>();
+  const [activities, setActivities] = useState<PartnerLoginActivity[]>([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(true);
+  const [activityError, setActivityError] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isRevokingSessions, setIsRevokingSessions] = useState(false);
 
-  const [appLock, setAppLock] = useState(false);
-  const [biometricLogin, setBiometricLogin] = useState(false);
+  const loadActivity = useCallback(async () => {
+    setIsLoadingActivity(true);
+    setActivityError('');
+    try {
+      setActivities(await getPartnerLoginActivity());
+    } catch (error) {
+      setActivityError(error instanceof Error ? error.message : 'Unable to load account activity.');
+    } finally {
+      setIsLoadingActivity(false);
+    }
+  }, []);
 
-  const handleBack = () => {
-    navigation.goBack();
+  useEffect(() => {
+    loadActivity();
+  }, [loadActivity]);
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword) {
+      Alert.alert('Password required', 'Enter your current password and a new password.');
+      return;
+    }
+    if (newPassword.length < 10) {
+      Alert.alert('Password too short', 'Use at least 10 characters for your new password.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Passwords do not match', 'Check the new password and confirmation.');
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      await changePartnerPassword(currentPassword, newPassword);
+      await logoutPartner();
+      Alert.alert('Password changed', 'Sign in again using your new password.', [
+        {text: 'Sign in', onPress: onLogout},
+      ]);
+    } catch (error) {
+      Alert.alert('Unable to change password', error instanceof Error ? error.message : 'Try again shortly.');
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
-  const handleLoginActivity = () => {
+  const handleLogoutAll = () => {
     Alert.alert(
-      'Login Activity',
-      'Recent login activity will be displayed here after backend authentication is connected.',
-      [{text: 'OK'}],
-    );
-  };
-
-  const handleLogoutAllDevices = () => {
-    Alert.alert(
-      'Logout from All Devices',
-      'This will sign out the delivery partner from all active devices.',
+      'Sign out all devices?',
+      'This signs out every active delivery partner session, including this device.',
       [
+        {text: 'Cancel', style: 'cancel'},
         {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Logout',
+          text: 'Sign out all',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Demo Action',
-              'All-device logout will be connected to the backend later.',
-            );
+          onPress: async () => {
+            setIsRevokingSessions(true);
+            try {
+              await revokePartnerSessions();
+              await logoutPartner();
+              onLogout();
+            } catch (error) {
+              Alert.alert('Unable to sign out devices', error instanceof Error ? error.message : 'Try again shortly.');
+            } finally {
+              setIsRevokingSessions(false);
+            }
           },
         },
       ],
     );
   };
 
-  const handleAppLockChange = (value: boolean) => {
-    if (value) {
-      Alert.alert(
-        'App Lock',
-        'PIN setup will be connected in the next security step.',
-        [{text: 'OK'}],
-      );
-      return;
-    }
-
-    setAppLock(false);
-  };
-
-  const handleBiometricChange = (value: boolean) => {
-    if (value) {
-      Alert.alert(
-        'Biometric Login',
-        'Fingerprint or face authentication will be connected to the device security system later.',
-        [{text: 'OK'}],
-      );
-      return;
-    }
-
-    setBiometricLogin(false);
-  };
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Pressable
-            style={styles.backButton}
-            onPress={handleBack}
-            accessibilityRole="button"
-            accessibilityLabel="Go back">
+          <Pressable style={styles.backButton} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Go back">
             <Text style={styles.backArrow}>‹</Text>
           </Pressable>
-
           <Text style={styles.headerTitle}>Security</Text>
           <View style={styles.headerSpacer} />
         </View>
 
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}>
-          <View style={styles.securityStatusCard}>
-            <View style={styles.securityStatusIcon}>
-              <Text style={styles.securityStatusIconText}>✓</Text>
-            </View>
-
-            <View style={styles.securityStatusContent}>
-              <Text style={styles.securityStatusTitle}>
-                Account Security
-              </Text>
-              <Text style={styles.securityStatusDescription}>
-                Your account security settings can be managed from this
-                screen.
-              </Text>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.statusCard}>
+            <Text style={styles.statusIcon}>✓</Text>
+            <View style={styles.flex}>
+              <Text style={styles.cardTitle}>Account security</Text>
+              <Text style={styles.description}>Manage your password, active sessions, and recent sign-ins.</Text>
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>App Security</Text>
-
+          <Text style={styles.sectionTitle}>Change password</Text>
           <View style={styles.card}>
-            <SettingSwitchRow
-              title="App Lock"
-              description="Require a PIN before opening the delivery partner app."
-              value={appLock}
-              onValueChange={handleAppLockChange}
-            />
-
-            <Divider />
-
-            <SettingSwitchRow
-              title="Biometric Login"
-              description="Use fingerprint or face authentication when available."
-              value={biometricLogin}
-              onValueChange={handleBiometricChange}
-            />
+            <Text style={styles.fieldLabel}>Current password</Text>
+            <TextInput value={currentPassword} onChangeText={setCurrentPassword} secureTextEntry autoCapitalize="none" style={styles.input} placeholder="Enter current password" />
+            <Text style={styles.fieldLabel}>New password</Text>
+            <TextInput value={newPassword} onChangeText={setNewPassword} secureTextEntry autoCapitalize="none" style={styles.input} placeholder="At least 10 characters" />
+            <Text style={styles.fieldLabel}>Confirm new password</Text>
+            <TextInput value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry autoCapitalize="none" style={styles.input} placeholder="Re-enter new password" />
+            <Pressable style={[styles.primaryButton, isChangingPassword && styles.disabledButton]} disabled={isChangingPassword} onPress={() => { handleChangePassword(); }} accessibilityRole="button">
+              {isChangingPassword ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Change password</Text>}
+            </Pressable>
+            <Text style={styles.helperText}>Changing your password ends existing sessions. You will need to sign in again.</Text>
           </View>
 
-          <Text style={styles.sectionTitle}>Account Activity</Text>
-
+          <Text style={styles.sectionTitle}>Recent sign-ins</Text>
           <View style={styles.card}>
-            <Pressable
-              style={styles.navigationRow}
-              onPress={handleLoginActivity}
-              accessibilityRole="button"
-              accessibilityLabel="View login activity">
-              <View style={styles.settingIcon}>
-                <Text style={styles.settingIconText}>◷</Text>
+            {isLoadingActivity ? (
+              <View style={styles.loadingRow}><ActivityIndicator color="#168447" /><Text style={styles.description}>Loading sign-in activity…</Text></View>
+            ) : activityError ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.errorText}>{activityError}</Text>
+                <Pressable onPress={() => { loadActivity(); }} accessibilityRole="button"><Text style={styles.linkText}>Retry</Text></Pressable>
               </View>
-
-              <View style={styles.settingContent}>
-                <Text style={styles.settingTitle}>Login Activity</Text>
-                <Text style={styles.settingDescription}>
-                  Review recent account login activity and devices.
-                </Text>
+            ) : activities.length === 0 ? (
+              <Text style={styles.emptyText}>No sign-in activity recorded yet.</Text>
+            ) : activities.map((activity, index) => (
+              <View key={activity._id} style={[styles.activityRow, index > 0 && styles.activityDivider]}>
+                <View style={styles.activityDot} />
+                <View style={styles.flex}>
+                  <Text style={styles.activityDevice} numberOfLines={2}>{activity.device || 'Unknown device'}</Text>
+                  <Text style={styles.activityMeta}>{activity.network || 'Network unavailable'}</Text>
+                  <Text style={styles.activityMeta}>{new Date(activity.signedInAt).toLocaleString()}</Text>
+                </View>
               </View>
-
-              <Text style={styles.rowArrow}>›</Text>
-            </Pressable>
-
-            <Divider />
-
-            <Pressable
-              style={styles.navigationRow}
-              onPress={handleLogoutAllDevices}
-              accessibilityRole="button"
-              accessibilityLabel="Logout from all devices">
-              <View style={styles.settingIconDanger}>
-                <Text style={styles.settingIconDangerText}>↪</Text>
-              </View>
-
-              <View style={styles.settingContent}>
-                <Text style={styles.settingTitleDanger}>
-                  Logout from All Devices
-                </Text>
-                <Text style={styles.settingDescription}>
-                  Sign out from all devices currently using this account.
-                </Text>
-              </View>
-
-              <Text style={styles.rowArrowDanger}>›</Text>
-            </Pressable>
+            ))}
           </View>
 
-          <View style={styles.noticeCard}>
-            <View style={styles.noticeIcon}>
-              <Text style={styles.noticeIconText}>i</Text>
-            </View>
-
-            <View style={styles.noticeContent}>
-              <Text style={styles.noticeTitle}>Security Information</Text>
-              <Text style={styles.noticeText}>
-                Authentication sessions, login activity, PIN security and
-                biometric authentication will be connected to the DailyMart
-                Nepal backend during the authentication and security phase.
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.bottomSpacing} />
+          <Text style={styles.sectionTitle}>Active sessions</Text>
+          <Pressable style={[styles.dangerButton, isRevokingSessions && styles.disabledButton]} disabled={isRevokingSessions} onPress={handleLogoutAll} accessibilityRole="button">
+            {isRevokingSessions ? <ActivityIndicator color="#B42318" /> : <Text style={styles.dangerButtonText}>Sign out all devices</Text>}
+          </Pressable>
+          <Text style={styles.helperText}>Use this if your phone is lost or you suspect someone else has access to your account.</Text>
         </ScrollView>
       </View>
     </SafeAreaView>
   );
 };
 
-type SettingSwitchRowProps = {
-  title: string;
-  description: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-};
-
-const SettingSwitchRow = ({
-  title,
-  description,
-  value,
-  onValueChange,
-}: SettingSwitchRowProps) => (
-  <View style={styles.settingRow}>
-    <View style={styles.settingContent}>
-      <Text style={styles.settingTitle}>{title}</Text>
-      <Text style={styles.settingDescription}>{description}</Text>
-    </View>
-
-    <Switch
-      value={value}
-      onValueChange={onValueChange}
-      trackColor={{
-        false: '#D1D5DB',
-        true: '#A5D6A7',
-      }}
-      thumbColor={value ? '#2E7D32' : '#F4F4F5'}
-    />
-  </View>
-);
-
-const Divider = () => <View style={styles.divider} />;
-
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F7F9F7',
-  },
-  container: {
-    flex: 1,
-  },
-  header: {
-    minHeight: 64,
-    paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5EAE5',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backArrow: {
-    fontSize: 32,
-    lineHeight: 32,
-    color: '#1F2937',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  headerSpacer: {
-    width: 42,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 30,
-  },
-  securityStatusCard: {
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: '#F0F7F0',
-    borderWidth: 1,
-    borderColor: '#D8EAD8',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  securityStatusIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  securityStatusIconText: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  securityStatusContent: {
-    flex: 1,
-  },
-  securityStatusTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  securityStatusDescription: {
-    marginTop: 4,
-    fontSize: 10,
-    lineHeight: 16,
-    color: '#667066',
-  },
-  sectionTitle: {
-    marginTop: 22,
-    marginBottom: 10,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  card: {
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5EAE5',
-    overflow: 'hidden',
-  },
-  navigationRow: {
-    minHeight: 78,
-    paddingHorizontal: 15,
-    paddingVertical: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  settingRow: {
-    minHeight: 78,
-    paddingHorizontal: 15,
-    paddingVertical: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  settingIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: '#E8F5E9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  settingIconText: {
-    fontSize: 18,
-    color: '#2E7D32',
-  },
-  settingIconDanger: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: '#FDECEC',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  settingIconDangerText: {
-    fontSize: 20,
-    color: '#D32F2F',
-  },
-  settingContent: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  settingTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  settingTitleDanger: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#D32F2F',
-  },
-  settingDescription: {
-    marginTop: 4,
-    fontSize: 10,
-    lineHeight: 16,
-    color: '#6B7280',
-  },
-  rowArrow: {
-    fontSize: 26,
-    color: '#2E7D32',
-  },
-  rowArrowDanger: {
-    fontSize: 26,
-    color: '#D32F2F',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#EEF0EE',
-    marginHorizontal: 15,
-  },
-  noticeCard: {
-    marginTop: 22,
-    padding: 15,
-    borderRadius: 15,
-    backgroundColor: '#FFF9ED',
-    borderWidth: 1,
-    borderColor: '#F4DFAC',
-    flexDirection: 'row',
-  },
-  noticeIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#F59E0B',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 11,
-  },
-  noticeIconText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  noticeContent: {
-    flex: 1,
-  },
-  noticeTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  noticeText: {
-    marginTop: 4,
-    fontSize: 10,
-    lineHeight: 16,
-    color: '#6B7280',
-  },
-  bottomSpacing: {
-    height: 20,
-  },
+  safeArea: {flex: 1, backgroundColor: '#F7F9F7'},
+  container: {flex: 1},
+  header: {minHeight: 64, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E5EAE5', flexDirection: 'row', alignItems: 'center'},
+  backButton: {width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center'},
+  backArrow: {fontSize: 32, lineHeight: 32, color: '#1F2937'},
+  headerTitle: {flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '700', color: '#1F2937'},
+  headerSpacer: {width: 42},
+  scrollContent: {paddingHorizontal: 16, paddingTop: 20, paddingBottom: 32},
+  statusCard: {padding: 16, borderRadius: 16, backgroundColor: '#F0F7F0', borderWidth: 1, borderColor: '#D8EAD8', flexDirection: 'row', alignItems: 'center'},
+  statusIcon: {width: 44, height: 44, lineHeight: 44, textAlign: 'center', borderRadius: 14, overflow: 'hidden', backgroundColor: '#2E7D32', color: '#FFFFFF', fontSize: 22, fontWeight: '800', marginRight: 12},
+  flex: {flex: 1},
+  cardTitle: {fontSize: 14, fontWeight: '700', color: '#1F2937'},
+  description: {marginTop: 4, fontSize: 11, lineHeight: 17, color: '#667066'},
+  sectionTitle: {marginTop: 22, marginBottom: 10, fontSize: 16, fontWeight: '700', color: '#1F2937'},
+  card: {padding: 15, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5EAE5'},
+  fieldLabel: {marginTop: 10, marginBottom: 6, fontSize: 12, fontWeight: '600', color: '#374151'},
+  input: {minHeight: 48, borderWidth: 1, borderColor: '#D9E0D9', borderRadius: 10, paddingHorizontal: 12, color: '#1F2937', backgroundColor: '#FFFFFF'},
+  primaryButton: {minHeight: 48, marginTop: 16, borderRadius: 11, backgroundColor: '#168447', alignItems: 'center', justifyContent: 'center'},
+  primaryButtonText: {color: '#FFFFFF', fontSize: 14, fontWeight: '700'},
+  disabledButton: {opacity: 0.6},
+  helperText: {marginTop: 10, fontSize: 10, lineHeight: 15, color: '#6B7280'},
+  loadingRow: {minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12},
+  emptyState: {gap: 10, paddingVertical: 12},
+  emptyText: {paddingVertical: 14, color: '#6B7280', fontSize: 12},
+  errorText: {color: '#B42318', fontSize: 12},
+  linkText: {color: '#168447', fontSize: 12, fontWeight: '700'},
+  activityRow: {paddingVertical: 12, flexDirection: 'row', alignItems: 'flex-start', gap: 11},
+  activityDivider: {borderTopWidth: 1, borderTopColor: '#EDF0ED'},
+  activityDot: {width: 9, height: 9, borderRadius: 5, marginTop: 4, backgroundColor: '#168447'},
+  activityDevice: {fontSize: 12, fontWeight: '600', color: '#1F2937'},
+  activityMeta: {marginTop: 4, fontSize: 10, color: '#6B7280'},
+  dangerButton: {minHeight: 48, borderWidth: 1, borderColor: '#F0B4AE', borderRadius: 11, backgroundColor: '#FFF7F6', alignItems: 'center', justifyContent: 'center'},
+  dangerButtonText: {color: '#B42318', fontSize: 13, fontWeight: '700'},
 });
 
 export default SecurityScreen;

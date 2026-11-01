@@ -29,14 +29,12 @@ type DocumentsNavigationProp = NativeStackNavigationProp<
 >;
 
 type DocumentId = 'DL' | 'CID' | 'VR' | 'INS';
-type DocumentStatus = 'PENDING' | 'VERIFIED' | 'VALID' | 'REJECTED';
+type DocumentStatus = 'MISSING' | 'PENDING' | 'VERIFIED' | 'REJECTED';
 
 type DocumentListItem = {
   id: DocumentId;
   title: string;
-  number: string;
   status: DocumentStatus;
-  expiry: string;
   description: string;
 };
 
@@ -44,41 +42,32 @@ const DOCUMENTS: DocumentListItem[] = [
   {
     id: 'DL',
     title: 'Driving License',
-    number: 'DL-NEP-204581',
-    status: 'VERIFIED',
-    expiry: 'Valid until 18 Dec 2028',
-    description:
-      'Your driving license has been verified and is currently valid.',
+    status: 'MISSING',
+    description: 'Upload your current driving license for review.',
   },
   {
     id: 'CID',
     title: 'Citizenship / ID',
-    number: 'ID-NEP-884521',
-    status: 'VERIFIED',
-    expiry: 'No expiry',
-    description: 'Your identity document has been verified by DailyMart Nepal.',
+    status: 'MISSING',
+    description: 'Upload your citizenship or government identity document.',
   },
   {
     id: 'VR',
     title: 'Vehicle Registration',
-    number: 'BA 12 PA 3456',
-    status: 'VERIFIED',
-    expiry: 'Valid until 14 Aug 2028',
-    description: 'Your vehicle registration information has been verified.',
+    status: 'MISSING',
+    description: 'Upload the registration document for your assigned vehicle.',
   },
   {
     id: 'INS',
     title: 'Vehicle Insurance',
-    number: 'INS-NEP-458921',
-    status: 'VALID',
-    expiry: 'Valid until 18 Dec 2026',
-    description: 'Your vehicle insurance is currently valid.',
+    status: 'MISSING',
+    description: 'Upload valid insurance for your assigned vehicle.',
   },
 ];
 
 const DocumentsScreen = () => {
   const navigation = useNavigation<DocumentsNavigationProp>();
-  const { getUploadedDocument } = useDocuments();
+  const {getUploadedDocument, isDocumentsLoaded, documentsError} = useDocuments();
 
   const handleDocumentPress = (documentId: DocumentId) => {
     navigation.navigate('DocumentDetails', { documentId });
@@ -86,8 +75,7 @@ const DocumentsScreen = () => {
 
   const documentItems = DOCUMENTS.map(document => {
     const uploadedDocument = getUploadedDocument(document.id);
-    const status: DocumentStatus =
-      uploadedDocument?.status === 'PENDING' ? 'PENDING' : document.status;
+    const status: DocumentStatus = uploadedDocument?.status || 'MISSING';
 
     return {
       ...document,
@@ -97,7 +85,7 @@ const DocumentsScreen = () => {
   });
 
   const verifiedCount = documentItems.filter(
-    document => document.status === 'VERIFIED' || document.status === 'VALID',
+    document => document.status === 'VERIFIED',
   ).length;
 
   return (
@@ -147,6 +135,18 @@ const DocumentsScreen = () => {
             </View>
           </View>
 
+          {!isDocumentsLoaded ? (
+            <Text style={styles.documentDescription}>Loading documents from DailyMart…</Text>
+          ) : null}
+          {documentsError ? (
+            <View style={styles.noticeCard}>
+              <View style={styles.noticeContent}>
+                <Text style={styles.noticeTitle}>Documents unavailable</Text>
+                <Text style={styles.noticeText}>{documentsError}</Text>
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Your Documents</Text>
             <Text style={styles.sectionCount}>
@@ -156,9 +156,9 @@ const DocumentsScreen = () => {
 
           {documentItems.map(document => {
             const isVerified = document.status === 'VERIFIED';
-            const isValid = document.status === 'VALID';
             const isPending = document.status === 'PENDING';
             const isRejected = document.status === 'REJECTED';
+            const isMissing = document.status === 'MISSING';
 
             return (
               <Pressable
@@ -183,27 +183,33 @@ const DocumentsScreen = () => {
                     <View
                       style={[
                         styles.statusBadge,
-                        (isVerified || isValid) && styles.statusBadgeVerified,
+                        isVerified && styles.statusBadgeVerified,
                         isPending && styles.statusBadgePending,
                         isRejected && styles.statusBadgeRejected,
+                        isMissing && styles.statusBadgeMissing,
                       ]}
                     >
                       <Text
                         style={[
                           styles.statusBadgeText,
-                          (isVerified || isValid) &&
+                          isVerified &&
                             styles.statusBadgeTextVerified,
                           isPending && styles.statusBadgeTextPending,
                           isRejected && styles.statusBadgeTextRejected,
+                          isMissing && styles.statusBadgeTextMissing,
                         ]}
                       >
-                        {document.status}
+                        {document.status === 'MISSING' ? 'NOT SUBMITTED' : document.status}
                       </Text>
                     </View>
                   </View>
 
-                  <Text style={styles.documentNumber}>{document.number}</Text>
-                  <Text style={styles.documentExpiry}>{document.expiry}</Text>
+                  <Text style={styles.documentNumber}>
+                    {document.uploadedDocument?.fileName || 'No file submitted'}
+                  </Text>
+                  {document.uploadedDocument?.reviewNote ? (
+                    <Text style={styles.documentExpiry}>{document.uploadedDocument.reviewNote}</Text>
+                  ) : null}
 
                   {document.uploadedDocument ? (
                     <Text style={styles.uploadedFileHint} numberOfLines={1}>
@@ -407,6 +413,9 @@ const styles = StyleSheet.create({
   statusBadgeRejected: {
     backgroundColor: '#FDECEC',
   },
+  statusBadgeMissing: {
+    backgroundColor: '#F3F4F6',
+  },
   statusBadgeText: {
     fontSize: 8,
     fontWeight: '800',
@@ -419,6 +428,9 @@ const styles = StyleSheet.create({
   },
   statusBadgeTextRejected: {
     color: '#D32F2F',
+  },
+  statusBadgeTextMissing: {
+    color: '#6B7280',
   },
   documentNumber: {
     marginTop: 7,

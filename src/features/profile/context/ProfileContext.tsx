@@ -11,6 +11,7 @@ import {
   Partner,
   setAvailability,
   updatePartnerProfile,
+  uploadPartnerProfileImage as uploadPartnerProfileImageRequest,
 } from '../../../shared/services/api';
 
 export type ProfileData = {
@@ -29,6 +30,7 @@ export type ProfileData = {
   availabilityStatus: Partner['availabilityStatus'];
   isActive: boolean;
   createdAt: string;
+  profileImage: {url: string; publicId: string} | null;
 };
 
 type ProfileFormData = Pick<
@@ -46,6 +48,7 @@ type ProfileContextValue = {
   isLoading: boolean;
   refreshProfile: () => Promise<void>;
   updateProfile: (data: ProfileFormData) => Promise<void>;
+  uploadProfileImage: (file: {uri: string; name: string; type: string}) => Promise<void>;
   updateAvailability: (isOnline: boolean) => Promise<void>;
 };
 
@@ -65,6 +68,7 @@ const EMPTY_PROFILE: ProfileData = {
   availabilityStatus: 'offline',
   isActive: false,
   createdAt: '',
+  profileImage: null,
 };
 
 const mapPartnerToProfile = (partner: Partner): ProfileData => ({
@@ -84,6 +88,9 @@ const mapPartnerToProfile = (partner: Partner): ProfileData => ({
   availabilityStatus: partner.availabilityStatus,
   isActive: partner.isActive,
   createdAt: partner.createdAt || '',
+  profileImage: partner.profileImage?.url
+    ? {url: partner.profileImage.url, publicId: partner.profileImage.publicId || ''}
+    : null,
 });
 
 const ProfileContext =
@@ -124,6 +131,11 @@ export const ProfileProvider = ({
     setProfile(mapPartnerToProfile(partner));
   }, []);
 
+  const uploadProfileImage = useCallback(async (file: {uri: string; name: string; type: string}) => {
+    const partner = await uploadPartnerProfileImageRequest(file);
+    setProfile(mapPartnerToProfile(partner));
+  }, []);
+
   const updateAvailability = useCallback(async (isOnline: boolean) => {
     const partner = await setAvailability(isOnline);
     setProfile(current => ({
@@ -133,8 +145,8 @@ export const ProfileProvider = ({
   }, []);
 
   const value = useMemo(
-    () => ({profile, isLoading, refreshProfile, updateProfile, updateAvailability}),
-    [profile, isLoading, refreshProfile, updateProfile, updateAvailability],
+    () => ({profile, isLoading, refreshProfile, updateProfile, uploadProfileImage, updateAvailability}),
+    [profile, isLoading, refreshProfile, updateProfile, uploadProfileImage, updateAvailability],
   );
 
   return (

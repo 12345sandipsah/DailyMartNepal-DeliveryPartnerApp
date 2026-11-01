@@ -56,6 +56,18 @@ const getStatusStyles = (status: TicketStatus) => {
         text: styles.ticketStatusTextResolved,
       };
 
+    case 'WAITING FOR CUSTOMER':
+      return {
+        container: styles.ticketStatusProgress,
+        text: styles.ticketStatusTextProgress,
+      };
+
+    case 'CLOSED':
+      return {
+        container: styles.ticketStatusResolved,
+        text: styles.ticketStatusTextResolved,
+      };
+
     default:
       return {
         container: styles.ticketStatusOpen,
@@ -350,8 +362,9 @@ const SupportScreen = () => {
             </Text>
 
             <Text style={styles.demoNotice}>
-              Demo mode: SOS does not currently contact emergency
-              services or send a live alert.
+              SOS sends an urgent DailyMart support ticket. For immediate
+              danger, contact local emergency services; this app does not
+              call them directly.
             </Text>
 
             <Pressable

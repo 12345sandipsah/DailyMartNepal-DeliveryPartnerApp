@@ -77,7 +77,7 @@ const CreateSupportTicketScreen = () => {
   // Prevent repeated submissions before React updates the UI.
   const submitLockRef = useRef(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (submitLockRef.current || !isLoaded) {
       return;
     }
@@ -124,7 +124,7 @@ const CreateSupportTicketScreen = () => {
     setIsSubmitting(true);
 
     try {
-      const createdTicket = addTicket({
+      const createdTicket = await addTicket({
         category,
         priority,
         subject: trimmedSubject,
@@ -155,14 +155,16 @@ const CreateSupportTicketScreen = () => {
           cancelable: false,
         },
       );
-    } catch {
+    } catch (error) {
       // Allow retry if ticket creation itself fails.
       submitLockRef.current = false;
       setIsSubmitting(false);
 
       Alert.alert(
         'Unable to Create Ticket',
-        'Your support ticket could not be created. Please try again.',
+        error instanceof Error
+          ? error.message
+          : 'Your support ticket could not be created. Please try again.',
       );
     }
   };

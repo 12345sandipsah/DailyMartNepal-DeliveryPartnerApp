@@ -362,11 +362,11 @@ function NavigationScreen({ route, navigation }: NavigationScreenProps) {
     setDeliveryStops(currentStops => {
       const updatedStops = [...currentStops];
 
-      const currentStop = updatedStops[currentIndex];
+      const displacedStop = updatedStops[currentIndex];
 
       updatedStops[currentIndex] = updatedStops[targetIndex];
 
-      updatedStops[targetIndex] = currentStop;
+      updatedStops[targetIndex] = displacedStop;
 
       return updatedStops;
     });
@@ -403,7 +403,7 @@ function NavigationScreen({ route, navigation }: NavigationScreenProps) {
         .join(';');
 
       const requestUrl =
-        `https\://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
+        `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
         `${coordinateString}` +
         `?alternatives=false` +
         `&overview=full` +
@@ -806,13 +806,7 @@ function NavigationScreen({ route, navigation }: NavigationScreenProps) {
 
           <Pressable
             style={styles.headerHelpButton}
-            onPress={() =>
-              Alert.alert(
-                'Help',
-
-                'Navigation support will be connected later.',
-              )
-            }
+            onPress={() => navigation.navigate('Support')}
           >
             <FontAwesomeIcon icon={faBullseye} size={14} color="#2563EB" />
 

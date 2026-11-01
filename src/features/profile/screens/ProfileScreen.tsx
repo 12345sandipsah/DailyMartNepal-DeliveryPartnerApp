@@ -1,7 +1,9 @@
 import React from 'react';
 
 import {
+  ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +22,7 @@ import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
 import { useProfile } from '../context/ProfileContext';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
+import {errorCodes, isErrorWithCode, pick, types} from '@react-native-documents/picker';
 import {
   
   faBell,
@@ -40,6 +43,7 @@ import {
   faRightFromBracket,
   faHouse,
   faTruck,
+  faPen,
 } from '@fortawesome/free-solid-svg-icons';
 
 /* ======================================================*
@@ -88,7 +92,8 @@ type ProfileScreenProps = {
 const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
   const navigation = useNavigation<ProfileNavigationProp>();
 
-  const {profile, refreshProfile, updateAvailability} = useProfile();
+  const {profile, refreshProfile, updateAvailability, uploadProfileImage} = useProfile();
+  const [isUploadingPhoto, setIsUploadingPhoto] = React.useState(false);
   const isOnline = profile.availabilityStatus !== 'offline';
 
   useFocusEffect(
@@ -128,6 +133,53 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
     navigation.navigate('EditProfile');
   };
 
+  const handleUploadProfilePhoto = async () => {
+    if (isUploadingPhoto) return;
+    try {
+      const [file] = await pick({allowMultiSelection: false, type: [types.images]});
+      if (!file) return;
+      if (!file.uri) {
+        Alert.alert('Unable to Select Photo', 'The selected image could not be accessed. Please choose another photo.');
+        return;
+      }
+      if (file.hasRequestedType === false) {
+        Alert.alert('Unsupported Photo', 'Choose a JPEG, PNG, WebP, or HEIC image.');
+        return;
+      }
+      if (typeof file.size === 'number' && file.size > 5 * 1024 * 1024) {
+        Alert.alert('Photo Too Large', 'Choose a profile photo smaller than 5 MB.');
+        return;
+      }
+
+      const extension = file.name?.split('.').pop()?.toLowerCase() || '';
+      const mimeByExtension: Record<string, string> = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+        heic: 'image/heic', heif: 'image/heif',
+      };
+      const mimeType = file.type?.toLowerCase() || mimeByExtension[extension];
+      if (!mimeType || !Object.values(mimeByExtension).includes(mimeType)) {
+        Alert.alert('Unsupported Photo', 'Choose a JPEG, PNG, WebP, or HEIC image.');
+        return;
+      }
+
+      setIsUploadingPhoto(true);
+      await uploadProfileImage({
+        uri: file.uri,
+        name: file.name || `profile-photo.${extension || 'jpg'}`,
+        type: mimeType,
+      });
+      Alert.alert('Photo Updated', 'Your profile photo has been uploaded.');
+    } catch (error) {
+      if (isErrorWithCode(error) && error.code === errorCodes.OPERATION_CANCELED) return;
+      Alert.alert(
+        'Photo Not Updated',
+        error instanceof Error ? error.message : 'Unable to upload your photo. Please try again.',
+      );
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
   const handleDocuments = () => {
     navigation.navigate('Documents');
   };
@@ -144,19 +196,7 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
     navigation.navigate('Support');
   };
 
-  /* ==================================================*
-
-*     FUTURE ROUTES*
-
-*  =================================================== */
-
-  const handleComingSoon = (title: string) => {
-    Alert.alert(
-      title,
-
-      `${title} will be connected to the backend and its dedicated screen later.`,
-    );
-  };
+  const handleVehicleDetails = () => navigation.navigate('VehicleDetails');
 
   /* ==================================================*
 
@@ -253,9 +293,13 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
               {/* Profile avatar */}
 
               <View style={styles.headerAvatar}>
-                <Text style={styles.headerAvatarText}>
-                  {getInitials(profile.fullName || 'Delivery Partner')}
-                </Text>
+                {profile.profileImage?.url ? (
+                  <Image source={{uri: profile.profileImage.url}} style={styles.headerAvatarImage} />
+                ) : (
+                  <Text style={styles.headerAvatarText}>
+                    {getInitials(profile.fullName || 'Delivery Partner')}
+                  </Text>
+                )}
 
                 <View style={styles.headerOnlineDot} />
               </View>
@@ -268,20 +312,29 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
 
 *          ========================================= */}
 
-          <Pressable
-            style={styles.profileCard}
-            onPress={handleEditProfile}
-            accessibilityRole="button"
-            accessibilityLabel="Open profile details"
-          >
+          <View style={styles.profileCard}>
             <View style={styles.profileAvatarLarge}>
-              <Text style={styles.profileAvatarText}>
-                {getInitials(profile.fullName || 'Delivery Partner')}
-              </Text>
+              {profile.profileImage?.url ? (
+                <Image source={{uri: profile.profileImage.url}} style={styles.profileAvatarImage} />
+              ) : (
+                <Text style={styles.profileAvatarText}>
+                  {getInitials(profile.fullName || 'Delivery Partner')}
+                </Text>
+              )}
 
-              <View style={styles.cameraBadge}>
-                <FontAwesomeIcon icon={faCamera} size={15} color="#FFFFFF" />
-              </View>
+              <Pressable
+                style={styles.cameraBadge}
+                onPress={handleUploadProfilePhoto}
+                disabled={isUploadingPhoto}
+                accessibilityRole="button"
+                accessibilityLabel={profile.profileImage?.url ? 'Change profile photo' : 'Upload profile photo'}
+              >
+                {isUploadingPhoto ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <FontAwesomeIcon icon={faCamera} size={15} color="#FFFFFF" />
+                )}
+              </Pressable>
             </View>
 
             <View style={styles.profileMainInfo}>
@@ -304,7 +357,14 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
               </View>
             </View>
 
-            <FontAwesomeIcon icon={faChevronRight} size={16} color="#7B858C" />
+            <Pressable
+              style={styles.editProfileButton}
+              onPress={handleEditProfile}
+              accessibilityRole="button"
+              accessibilityLabel="Edit profile details"
+            >
+              <FontAwesomeIcon icon={faPen} size={15} color="#0B604C" />
+            </Pressable>
 
             {/* Statistics */}
 
@@ -334,7 +394,7 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
                 label="Partner Since"
               />
             </View>
-          </Pressable>
+          </View>
 
           {/* ========================================*
 
@@ -406,7 +466,7 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
               iconType="blue"
               title="Vehicle Details"
               subtitle="Vehicle information and documents"
-              onPress={() => handleComingSoon('Vehicle Details')}
+              onPress={handleVehicleDetails}
             />
 
             <MenuDivider />
@@ -425,8 +485,8 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
               icon={faBuildingColumns}
               iconType="purple"
               title="Bank & Payment Details"
-              subtitle="Bank account for earnings payout"
-              onPress={() => handleComingSoon('Bank & Payment Details')}
+              subtitle="Contact support about payout details"
+              onPress={handleSupport}
             />
 
             <MenuDivider />
@@ -472,7 +532,7 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
               iconType="red"
               title="About App"
               subtitle="Version, terms, privacy policy"
-              onPress={() => handleComingSoon('About App')}
+              onPress={handleSettings}
             />
           </View>
 
@@ -962,6 +1022,12 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
 
+  headerAvatarImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+
   headerAvatarText: {
     fontSize: 14,
 
@@ -1036,6 +1102,12 @@ const styles = StyleSheet.create({
     borderColor: '#EAF5ED',
   },
 
+  profileAvatarImage: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+  },
+
   profileAvatarText: {
     fontSize: 29,
 
@@ -1081,7 +1153,7 @@ const styles = StyleSheet.create({
   profileMainInfo: {
     marginLeft: 110,
 
-    paddingRight: 28,
+    paddingRight: 42,
 
     minHeight: 96,
 
@@ -1157,6 +1229,20 @@ const styles = StyleSheet.create({
   },
 
   profileChevronIcon: { position: 'absolute', right: 16, top: 34 },
+
+  editProfileButton: {
+    position: 'absolute',
+    right: 14,
+    top: 34,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D5E9DA',
+  },
 
   profileChevron: {
     position: 'absolute',

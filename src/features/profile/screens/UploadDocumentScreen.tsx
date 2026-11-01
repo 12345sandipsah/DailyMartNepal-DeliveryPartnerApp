@@ -22,6 +22,7 @@ import {
 
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
 import {useDocuments} from '../context/DocumentsContext';
+import type {PartnerDocumentType} from '../../../shared/services/api';
 
 type NavigationProp = NativeStackNavigationProp<
   MainStackParamList,
@@ -30,7 +31,7 @@ type NavigationProp = NativeStackNavigationProp<
 
 type UploadRouteProp = RouteProp<MainStackParamList, 'UploadDocument'>;
 
-const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_DOCUMENT_SIZE_BYTES = 8 * 1024 * 1024;
 
 const DOCUMENTS = {
   DL: 'Driving License',
@@ -45,7 +46,10 @@ const UploadDocumentScreen = () => {
   const {saveUploadedDocument, getUploadedDocument} = useDocuments();
 
   // The document ID comes from the screen the user selected.
-  const documentId = route.params?.documentId;
+  const requestedDocumentId = route.params?.documentId;
+  const documentId = requestedDocumentId && requestedDocumentId in DOCUMENTS
+    ? requestedDocumentId as PartnerDocumentType
+    : undefined;
   const documentTitle =
     documentId && documentId in DOCUMENTS
       ? DOCUMENTS[documentId as keyof typeof DOCUMENTS]
@@ -57,6 +61,7 @@ const UploadDocumentScreen = () => {
 
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileUri, setFileUri] = useState<string | null>(null);
+  const [fileMimeType, setFileMimeType] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!documentId || !documentTitle) {
@@ -107,28 +112,44 @@ const UploadDocumentScreen = () => {
       ) {
         Alert.alert(
           'File Too Large',
-          'Choose an image or PDF that is 10 MB or smaller.',
+        'Choose a JPEG, PNG, WebP, or PDF that is 8 MB or smaller.',
         );
         return;
       }
 
-      const mimeType = file.type?.toLowerCase();
-      const hasAllowedExtension =
-        /\.(pdf|png|jpe?g|webp|heic|heif)$/i.test(name);
-      const hasAllowedMimeType =
-        mimeType === 'application/pdf' ||
-        Boolean(mimeType?.startsWith('image/'));
+      const extension = name.split('.').pop()?.toLowerCase();
+      const extensionMimeType: Record<string, string> = {
+        pdf: 'application/pdf',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        webp: 'image/webp',
+      };
+      const pickedMimeType = file.type?.toLowerCase();
+      const mimeType = pickedMimeType && pickedMimeType !== 'application/octet-stream'
+        ? pickedMimeType
+        : extensionMimeType[extension || ''];
+      const hasAllowedMimeType = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(mimeType || '');
+      const hasAllowedExtension = Boolean(extensionMimeType[extension || '']);
 
       if (!hasAllowedExtension && !hasAllowedMimeType) {
         Alert.alert(
           'Unsupported File',
-          'Please select an image or PDF document.',
+          'Please select a PDF, JPEG, PNG, or WebP document.',
         );
         return;
       }
 
+      const resolvedMimeType = hasAllowedMimeType
+        ? mimeType
+        : extensionMimeType[extension || ''];
+      if (!resolvedMimeType) {
+        Alert.alert('Unsupported File', 'Please select a PDF, JPEG, PNG, or WebP document.');
+        return;
+      }
       setFileName(name);
       setFileUri(uri);
+      setFileMimeType(resolvedMimeType);
     } catch (error) {
       if (
         isErrorWithCode(error) &&
@@ -144,7 +165,7 @@ const UploadDocumentScreen = () => {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (isSubmitting) {
       return;
     }
@@ -158,9 +179,12 @@ const UploadDocumentScreen = () => {
     }
 
     setIsSubmitting(true);
-
     try {
-      saveUploadedDocument(documentId, fileName, fileUri);
+      await saveUploadedDocument(documentId, {
+        uri: fileUri,
+        name: fileName,
+        type: fileMimeType || 'application/octet-stream',
+      });
 
       Alert.alert(
         'Document Submitted',
@@ -172,10 +196,10 @@ const UploadDocumentScreen = () => {
           },
         ],
       );
-    } catch {
+    } catch (error) {
       Alert.alert(
         'Submission Failed',
-        'The document could not be saved. Please try again.',
+        error instanceof Error ? error.message : 'The document could not be uploaded. Please try again.',
       );
     } finally {
       setIsSubmitting(false);
@@ -248,7 +272,7 @@ const UploadDocumentScreen = () => {
                   {existingDocument ? 'Choose Replacement File' : 'Choose File'}
                 </Text>
                 <Text style={styles.description}>
-                  Select a clear photo or PDF, up to 10 MB.
+                  Select a clear JPEG, PNG, WebP, or PDF, up to 8 MB.
                 </Text>
 
                 <View style={styles.chooseButton}>

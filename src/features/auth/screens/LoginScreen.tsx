@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import {Alert} from 'react-native';
 import {loginPartner} from '../../../shared/services/api';
 
 import {
@@ -24,8 +25,6 @@ import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons/faArrowLeft';
 
 import { faArrowRight } from '@fortawesome/free-solid-svg-icons/faArrowRight';
-
-import { faCheck } from '@fortawesome/free-solid-svg-icons/faCheck';
 
 import { faChevronDown } from '@fortawesome/free-solid-svg-icons/faChevronDown';
 
@@ -60,9 +59,12 @@ type LoginScreenNavigationProp = NativeStackNavigationProp<
 
  */
 
+function normalizeNepalMobileNumber(value: string): string {
+  return value.replace(/[\s()-]/g, '').replace(/^\+?977/, '');
+}
+
 function isValidNepalMobileNumber(value: string): boolean {
-  const localPhone = value.replace(/[\s()-]/g, '');
-  return /^9\d{9}$/.test(localPhone);
+  return /^9\d{9}$/.test(normalizeNepalMobileNumber(value));
 }
 
 function LoginScreen({ onAuthenticated }: LoginScreenProps) {
@@ -73,8 +75,6 @@ function LoginScreen({ onAuthenticated }: LoginScreenProps) {
   const [password, setPassword] = useState('');
 
   const [showPassword, setShowPassword] = useState(false);
-
-  const [rememberMe, setRememberMe] = useState(false);
 
   const [phoneError, setPhoneError] = useState('');
 
@@ -106,7 +106,7 @@ function LoginScreen({ onAuthenticated }: LoginScreenProps) {
 
     setIsSubmitting(true);
     try {
-      await loginPartner(phone, password);
+      await loginPartner(normalizeNepalMobileNumber(phone), password);
       onAuthenticated?.();
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Unable to sign in.');
@@ -116,11 +116,19 @@ function LoginScreen({ onAuthenticated }: LoginScreenProps) {
   };
 
   const handleForgotPassword = () => {
-    // Forgot Password screen will be added later.*
+    Alert.alert(
+      'Reset your password',
+      'Delivery partner accounts are managed by DailyMart. Contact your warehouse manager to reset your access, then change the temporary password in Security settings.',
+      [{text: 'OK'}],
+    );
   };
 
   const handleRegister = () => {
-    // Registration screen will be added later.*
+    Alert.alert(
+      'Partner account required',
+      'Delivery partner accounts are created by a DailyMart administrator. Ask your warehouse manager to set up your account.',
+      [{text: 'OK'}],
+    );
   };
 
   return (
@@ -412,31 +420,10 @@ function LoginScreen({ onAuthenticated }: LoginScreenProps) {
               <Text style={styles.errorText} accessibilityLiveRegion="polite">{loginError}</Text>
             ) : null}
 
-            {/* REMEMBER ME / FORGOT PASSWORD */}
+            {/* SESSION POLICY / FORGOT PASSWORD */}
 
             <View style={styles.optionsRow}>
-              <Pressable
-                style={styles.rememberContainer}
-                onPress={() => setRememberMe(previous => !previous)}
-                accessibilityRole="checkbox"
-                accessibilityState={{
-                  checked: rememberMe,
-                }}
-              >
-                <View
-                  style={[
-                    styles.checkbox,
-
-                    rememberMe && styles.checkboxChecked,
-                  ]}
-                >
-                  {rememberMe ? (
-                    <FontAwesomeIcon icon={faCheck} size={13} color="#FFFFFF" />
-                  ) : null}
-                </View>
-
-                <Text style={styles.rememberText}>Remember me</Text>
-              </Pressable>
+              <Text style={styles.sessionExpiryText}>Automatic sign-out after 24 hours</Text>
 
               <Pressable
                 onPress={handleForgotPassword}
@@ -1304,41 +1291,9 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
 
-  rememberContainer: {
-    flexDirection: 'row',
-
-    alignItems: 'center',
-  },
-
-  checkbox: {
-    width: 24,
-
-    height: 24,
-
-    borderRadius: 6,
-
-    borderWidth: 1.5,
-
-    borderColor: '#C6CECA',
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-  },
-
-  checkboxChecked: {
-    backgroundColor: '#0BA457',
-
-    borderColor: '#0BA457',
-  },
-
-  rememberText: {
-    marginLeft: 8,
-
-    fontSize: 14,
-
+  sessionExpiryText: {
+    fontSize: 12,
     color: '#697176',
-
     fontWeight: '500',
   },
 

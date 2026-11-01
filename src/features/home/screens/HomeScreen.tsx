@@ -29,7 +29,16 @@ import {
   faRoute,
 } from '@fortawesome/free-solid-svg-icons';
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
-import {getDeliveries, getPartner, OrderRecord, setAvailability} from '../../../shared/services/api';
+import {
+  getDeliveries,
+  getPartner,
+  getPartnerEarnings,
+  getPartnerNotifications,
+  markPartnerNotificationRead,
+  OrderRecord,
+  PartnerNotification,
+  setAvailability,
+} from '../../../shared/services/api';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<
   MainStackParamList,
@@ -54,15 +63,19 @@ function HomeScreen() {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const [isOnline, setIsOnline] = useState(false);
   const [partnerOrders, setPartnerOrders] = useState<OrderRecord[]>([]);
+  const [recentNotifications, setRecentNotifications] = useState<PartnerNotification[]>([]);
+  const [todayPayout, setTodayPayout] = useState<number | null>(null);
 
   useFocusEffect(
     React.useCallback(() => {
       let active = true;
-      Promise.all([getPartner(), getDeliveries()])
-        .then(([partner, orders]) => {
+      Promise.all([getPartner(), getDeliveries(), getPartnerNotifications(), getPartnerEarnings('today')])
+        .then(([partner, orders, notifications, earnings]) => {
           if (!active) return;
           setIsOnline(partner.availabilityStatus !== 'offline');
           setPartnerOrders(orders);
+          setRecentNotifications(notifications);
+          setTodayPayout(earnings.paidOutInPeriod);
         })
         .catch(error => {
           if (active) Alert.alert('DailyMart data unavailable', error instanceof Error ? error.message : 'Retry.');
@@ -75,7 +88,7 @@ function HomeScreen() {
     partnerOrders.find(order => order.orderStatus === 'out_for_delivery') ||
     partnerOrders[0] ||
     null;
-  const todayEarnings = '—';
+  const todayEarnings = todayPayout === null ? '—' : todayPayout.toLocaleString('en-IN');
   const deliveriesToday = partnerOrders.length;
   const rating = '—';
   const handleViewDeliveries = () => {
@@ -100,6 +113,26 @@ function HomeScreen() {
 
   const handleViewProfile = () => {
     navigation.navigate('Profile');
+  };
+
+  const handleOpenNotification = async (notification: PartnerNotification) => {
+    const typeValue = String(notification.type || '').toUpperCase();
+    const type = typeValue === 'DELIVERY' || typeValue === 'PICKUP' || typeValue === 'PAYMENT'
+      ? typeValue
+      : 'SYSTEM';
+    try {
+      if (!notification.isRead) await markPartnerNotificationRead(notification._id);
+    } catch (error) {
+      Alert.alert('Notification not updated', error instanceof Error ? error.message : 'The notification will remain unread.');
+    }
+    navigation.navigate('NotificationDetails', {
+      title: notification.title,
+      message: notification.message,
+      time: new Date(notification.createdAt).toLocaleString(),
+      type,
+      deliveryId: notification.data?.orderNumber || notification.data?.orderId,
+      read: true,
+    });
   };
 
   const handleToggleAvailability = async () => {
@@ -155,7 +188,7 @@ function HomeScreen() {
                   size={22}
                   color={COLORS.darkGreen}
                 />
-                <View style={styles.notificationDot} />
+                {recentNotifications.some(notification => !notification.isRead) ? <View style={styles.notificationDot} /> : null}
               </Pressable>
 
               <Pressable
@@ -479,117 +512,30 @@ function HomeScreen() {
           </View>
 
           <View style={styles.notificationsCard}>
-            <Pressable
-              style={styles.notificationRow}
-              onPress={handleViewNotifications}
-              accessibilityRole="button"
-              accessibilityLabel="Open new delivery assigned notification">
-              <View
-                style={[
-                  styles.notificationIcon,
-                  styles.notificationIconGreen,
-                ]}>
-                <FontAwesomeIcon
-                  icon={faBox}
-                  size={19}
-                  color={COLORS.green}
-                />
-              </View>
-
-              <View style={styles.notificationContent}>
-                <Text style={styles.notificationTitle}>
-                  New delivery assigned
-                </Text>
-                <Text style={styles.notificationDescription}>
-                  #DM-12346 • 1.8 km from your location
-                </Text>
-              </View>
-
-              <View style={styles.notificationMeta}>
-                <Text style={styles.notificationTime}>10 min ago</Text>
-                <FontAwesomeIcon
-                  icon={faChevronRight}
-                  size={13}
-                  color="#9AA0A3"
-                />
-              </View>
-            </Pressable>
-
-            <View style={styles.notificationDivider} />
-
-            <Pressable
-              style={styles.notificationRow}
-              onPress={handleViewNotifications}
-              accessibilityRole="button"
-              accessibilityLabel="Open warehouse pickup notification">
-              <View
-                style={[
-                  styles.notificationIcon,
-                  styles.notificationIconOrange,
-                ]}>
-                <FontAwesomeIcon
-                  icon={faTruck}
-                  size={19}
-                  color={COLORS.orange}
-                />
-              </View>
-
-              <View style={styles.notificationContent}>
-                <Text style={styles.notificationTitle}>
-                  Warehouse ready for pickup
-                </Text>
-                <Text style={styles.notificationDescription}>
-                  2 orders are ready at DailyMart Warehouse
-                </Text>
-              </View>
-
-              <View style={styles.notificationMeta}>
-                <Text style={styles.notificationTime}>25 min ago</Text>
-                <FontAwesomeIcon
-                  icon={faChevronRight}
-                  size={13}
-                  color="#9AA0A3"
-                />
-              </View>
-            </Pressable>
-
-            <View style={styles.notificationDivider} />
-
-            <Pressable
-              style={styles.notificationRow}
-              onPress={handleViewNotifications}
-              accessibilityRole="button"
-              accessibilityLabel="Open announcement notification">
-              <View
-                style={[
-                  styles.notificationIcon,
-                  styles.notificationIconBlue,
-                ]}>
-                <FontAwesomeIcon
-                  icon={faCircleInfo}
-                  size={19}
-                  color={COLORS.blue}
-                />
-              </View>
-
-              <View style={styles.notificationContent}>
-                <Text style={styles.notificationTitle}>
-                  Important Announcement
-                </Text>
-                <Text style={styles.notificationDescription}>
-                  New delivery zone updated for Kathmandu
-                </Text>
-              </View>
-
-              <View style={styles.notificationMeta}>
-                <Text style={styles.notificationTime}>1 hour ago</Text>
-                <FontAwesomeIcon
-                  icon={faChevronRight}
-                  size={13}
-                  color="#9AA0A3"
-                />
-              </View>
-            </Pressable>
+            {recentNotifications.length === 0 ? (
+              <Text style={styles.noNotificationsText}>No recent notifications.</Text>
+            ) : recentNotifications.slice(0, 3).map((notification, index) => {
+              const normalizedType = String(notification.type || '').toLowerCase();
+              const icon = normalizedType.includes('delivery') ? faBox : normalizedType.includes('payment') ? faWallet : normalizedType.includes('pickup') ? faTruck : faCircleInfo;
+              const iconStyle = normalizedType.includes('delivery') ? styles.notificationIconGreen : normalizedType.includes('payment') ? styles.notificationIconBlue : styles.notificationIconOrange;
+              const iconColor = normalizedType.includes('delivery') ? COLORS.green : normalizedType.includes('payment') ? COLORS.blue : COLORS.orange;
+              return (
+                <React.Fragment key={notification._id}>
+                  {index > 0 ? <View style={styles.notificationDivider} /> : null}
+                  <Pressable style={styles.notificationRow} onPress={() => handleOpenNotification(notification)} accessibilityRole="button" accessibilityLabel={`Open notification: ${notification.title}`}>
+                    <View style={[styles.notificationIcon, iconStyle]}><FontAwesomeIcon icon={icon} size={19} color={iconColor} /></View>
+                    <View style={styles.notificationContent}>
+                      <Text style={styles.notificationTitle} numberOfLines={1}>{notification.title}</Text>
+                      <Text style={styles.notificationDescription} numberOfLines={2}>{notification.message}</Text>
+                    </View>
+                    <View style={styles.notificationMeta}>
+                      <Text style={styles.notificationTime}>{new Date(notification.createdAt).toLocaleDateString()}</Text>
+                      <FontAwesomeIcon icon={faChevronRight} size={13} color="#9AA0A3" />
+                    </View>
+                  </Pressable>
+                </React.Fragment>
+              );
+            })}
           </View>
         </ScrollView>
 
@@ -1211,6 +1157,13 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     overflow: 'hidden',
     marginBottom: 10,
+  },
+  noNotificationsText: {
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    color: '#6E7578',
+    fontSize: 12,
+    textAlign: 'center',
   },
   notificationRow: {
     minHeight: 82,

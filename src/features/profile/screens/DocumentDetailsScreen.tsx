@@ -2,11 +2,6 @@ import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import {
   faArrowLeft,
-  faCircleCheck,
-  faCircleExclamation,
-  faCircleInfo,
-  faCircleQuestion,
-  faFileLines,
 } from '@fortawesome/free-solid-svg-icons';
 
 import {
@@ -40,84 +35,32 @@ type DocumentDetailsRouteProp = RouteProp<
 
 type DocumentDetails = {
   title: string;
-
-  number: string;
-
-  status: string;
-
-  expiry: string;
-
   documentType: string;
-
-  issuedBy: string;
-
-  description: string;
 };
 
 const DOCUMENT_DATA: Record<string, DocumentDetails> = {
   DL: {
     title: 'Driving License',
 
-    number: 'DL-NEP-204581',
-
-    status: 'VERIFIED',
-
-    expiry: '18 December 2028',
-
     documentType: 'Driving License',
-
-    issuedBy: 'Government of Nepal',
-
-    description:
-      'Your driving license has been verified and is currently valid for delivery operations.',
   },
 
   CID: {
     title: 'Citizenship / ID',
 
-    number: 'ID-NEP-884521',
-
-    status: 'VERIFIED',
-
-    expiry: 'No expiry',
-
     documentType: 'Citizenship / Identity Document',
-
-    issuedBy: 'Government of Nepal',
-
-    description: 'Your identity document has been verified by DailyMart Nepal.',
   },
 
   VR: {
     title: 'Vehicle Registration',
 
-    number: 'BA 12 PA 3456',
-
-    status: 'VERIFIED',
-
-    expiry: '14 August 2028',
-
     documentType: 'Vehicle Registration',
-
-    issuedBy: 'Government of Nepal',
-
-    description: 'Your vehicle registration information has been verified.',
   },
 
   INS: {
     title: 'Vehicle Insurance',
 
-    number: 'INS-NEP-458921',
-
-    status: 'VALID',
-
-    expiry: '18 December 2026',
-
     documentType: 'Vehicle Insurance',
-
-    issuedBy: 'Nepal Insurance Provider',
-
-    description: 'Your vehicle insurance is currently valid.',
   },
 };
 
@@ -134,8 +77,14 @@ const DocumentDetailsScreen = () => {
 
   const uploadedDocument = getUploadedDocument(documentId);
 
-  const displayedStatus =
-    uploadedDocument?.status === 'PENDING' ? 'PENDING' : document?.status ?? '';
+  const displayedStatus = uploadedDocument?.status ?? 'NOT SUBMITTED';
+  const verificationText = uploadedDocument?.status === 'PENDING'
+    ? 'Your document was uploaded and is waiting for a DailyMart administrator to review it.'
+    : uploadedDocument?.status === 'VERIFIED'
+      ? 'This document has been reviewed and verified by DailyMart.'
+      : uploadedDocument?.status === 'REJECTED'
+        ? uploadedDocument.reviewNote || 'This document needs a new upload. Review the administrator’s note and replace it.'
+        : 'Upload a clear copy to submit this document for verification.';
 
   const handleUploadDocument = () => {
     navigation.navigate('UploadDocument', {
@@ -236,7 +185,9 @@ const DocumentDetailsScreen = () => {
               </Text>
             </View>
 
-            <Text style={styles.documentNumber}>{document.number}</Text>
+            <Text style={styles.documentNumber}>
+              {uploadedDocument?.fileName || 'No file submitted'}
+            </Text>
           </View>
 
           <View style={styles.section}>
@@ -247,19 +198,12 @@ const DocumentDetailsScreen = () => {
 
               <InfoDivider />
 
-              <InfoRow label="Document Number" value={document.number} />
-
-              <InfoDivider />
-
-              <InfoRow label="Issued By" value={document.issuedBy} />
-
-              <InfoDivider />
-
-              <InfoRow label="Expiry" value={document.expiry} />
-
-              <InfoDivider />
-
               <InfoRow label="Status" value={displayedStatus} />
+              <InfoDivider />
+              <InfoRow
+                label="Last updated"
+                value={uploadedDocument ? new Date(uploadedDocument.updatedAt).toLocaleString() : '—'}
+              />
             </View>
           </View>
 
@@ -283,14 +227,16 @@ const DocumentDetailsScreen = () => {
               <View style={styles.verificationContent}>
                 <Text style={styles.verificationTitle}>
                   {uploadedDocument?.status === 'PENDING'
-                    ? 'Pending Verification'
-                    : 'Document Status'}
+                    ? 'Pending verification'
+                    : uploadedDocument?.status === 'VERIFIED'
+                      ? 'Verified'
+                      : uploadedDocument?.status === 'REJECTED'
+                        ? 'Update required'
+                        : 'No document submitted'}
                 </Text>
 
                 <Text style={styles.verificationText}>
-                  {uploadedDocument?.status === 'PENDING'
-                    ? 'Your document file has been uploaded successfully and is waiting for verification.'
-                    : document.description}
+                  {verificationText}
                 </Text>
               </View>
             </View>
@@ -315,9 +261,7 @@ const DocumentDetailsScreen = () => {
                   </Text>
 
                   <View style={styles.pendingBadge}>
-                    <Text style={styles.pendingBadgeText}>
-                      Pending Verification
-                    </Text>
+                    <Text style={styles.pendingBadgeText}>{displayedStatus}</Text>
                   </View>
                 </View>
               </View>

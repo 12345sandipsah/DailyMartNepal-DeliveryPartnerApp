@@ -1,5 +1,5 @@
 
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 
 import {
   Alert,
@@ -11,8 +11,6 @@ import {
   View,
 } from 'react-native';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {useNavigation} from '@react-navigation/native';
@@ -20,186 +18,59 @@ import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
+import {
+  getPartnerPreferences,
+  updatePartnerPreferences,
+} from '../../../shared/services/api';
+import type {PartnerPreferences} from '../../../shared/services/api';
 
 type SettingsNavigationProp = NativeStackNavigationProp<
   MainStackParamList,
   'Home'
 >;
 
-type SettingsPreferences = {
-  deliveryNotifications: boolean;
-  paymentNotifications: boolean;
-  soundNotifications: boolean;
-  autoAcceptDeliveries: boolean;
-  locationUpdates: boolean;
-};
-
-const SETTINGS_STORAGE_KEY = '@dailymart_delivery_settings';
-
-const DEFAULT_PREFERENCES: SettingsPreferences = {
-  deliveryNotifications: true,
-  paymentNotifications: true,
-  soundNotifications: true,
-  autoAcceptDeliveries: false,
-  locationUpdates: true,
-};
-
 const SettingsScreen = () => {
   const navigation = useNavigation<SettingsNavigationProp>();
-
-  const [preferences, setPreferences] =
-    useState<SettingsPreferences>(DEFAULT_PREFERENCES);
-
+  const [preferences, setPreferences] = useState<PartnerPreferences | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [storageError, setStorageError] = useState(false);
-
-  // Load saved settings before enabling edits or saving anything.
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadPreferences = async () => {
-      try {
-        const storedValue = await AsyncStorage.getItem(
-          SETTINGS_STORAGE_KEY,
-        );
-
-        if (!isMounted) {
-          return;
-        }
-
-        if (storedValue) {
-          try {
-            const parsed: unknown = JSON.parse(storedValue);
-
-            if (
-              parsed !== null &&
-              typeof parsed === 'object' &&
-              !Array.isArray(parsed)
-            ) {
-              const saved = parsed as Partial<SettingsPreferences>;
-
-              setPreferences({
-                deliveryNotifications:
-                  typeof saved.deliveryNotifications === 'boolean'
-                    ? saved.deliveryNotifications
-                    : DEFAULT_PREFERENCES.deliveryNotifications,
-
-                paymentNotifications:
-                  typeof saved.paymentNotifications === 'boolean'
-                    ? saved.paymentNotifications
-                    : DEFAULT_PREFERENCES.paymentNotifications,
-
-                soundNotifications:
-                  typeof saved.soundNotifications === 'boolean'
-                    ? saved.soundNotifications
-                    : DEFAULT_PREFERENCES.soundNotifications,
-
-                autoAcceptDeliveries:
-                  typeof saved.autoAcceptDeliveries === 'boolean'
-                    ? saved.autoAcceptDeliveries
-                    : DEFAULT_PREFERENCES.autoAcceptDeliveries,
-
-                locationUpdates:
-                  typeof saved.locationUpdates === 'boolean'
-                    ? saved.locationUpdates
-                    : DEFAULT_PREFERENCES.locationUpdates,
-              });
-            }
-          } catch {
-            // Ignore malformed saved data and use safe defaults.
-            setPreferences(DEFAULT_PREFERENCES);
-          }
-        }
-      } catch {
-        if (isMounted) {
-          setStorageError(true);
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoaded(true);
-        }
-      }
-    };
-
-    void loadPreferences();
-
-    return () => {
-      isMounted = false;
-    };
+  const [preferenceError, setPreferenceError] = useState('');
+  const loadPreferences = useCallback(async () => {
+    setIsLoaded(false);
+    setPreferenceError('');
+    try {
+      setPreferences(await getPartnerPreferences());
+    } catch (error) {
+      setPreferenceError(error instanceof Error ? error.message : 'Unable to load your account preferences.');
+    } finally {
+      setIsLoaded(true);
+    }
   }, []);
 
-  // Persist preferences only after the initial load has completed.
   useEffect(() => {
-    if (!isLoaded) {
-      return;
+    loadPreferences();
+  }, [loadPreferences]);
+
+  const updatePreference = async (key: keyof PartnerPreferences, value: boolean) => {
+    if (!preferences || isSaving) return;
+    const previous = preferences;
+    setPreferences({...previous, [key]: value});
+    setIsSaving(true);
+    setPreferenceError('');
+    try {
+      setPreferences(await updatePartnerPreferences({[key]: value}));
+    } catch (error) {
+      setPreferences(previous);
+      const message = error instanceof Error ? error.message : 'Your preference could not be saved.';
+      setPreferenceError(message);
+      Alert.alert('Could not save preference', message);
+    } finally {
+      setIsSaving(false);
     }
-
-    let isMounted = true;
-
-    const savePreferences = async () => {
-      setIsSaving(true);
-
-      try {
-        await AsyncStorage.setItem(
-          SETTINGS_STORAGE_KEY,
-          JSON.stringify(preferences),
-        );
-
-        if (isMounted) {
-          setStorageError(false);
-        }
-      } catch {
-        if (isMounted) {
-          setStorageError(true);
-        }
-      } finally {
-        if (isMounted) {
-          setIsSaving(false);
-        }
-      }
-    };
-
-    void savePreferences();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [preferences, isLoaded]);
-
-  const updatePreference = <K extends keyof SettingsPreferences>(
-    key: K,
-    value: SettingsPreferences[K],
-  ) => {
-    setPreferences(current => ({
-      ...current,
-      [key]: value,
-    }));
   };
 
   const handleBack = () => {
     navigation.goBack();
-  };
-
-  const handleDeliveryPreferences = () => {
-    Alert.alert(
-      'Delivery Preferences',
-      'Your assignment preference is saved on this device. Delivery assignments still require explicit acceptance. Automatic assignment behavior will be controlled by the backend when it is connected.',
-    );
-  };
-
-  const handleLocationSettings = () => {
-    Alert.alert(
-      'Location & Navigation',
-      'This switch saves your location-update preference locally. It does not grant or revoke Android location permission, start GPS tracking, or change Mapbox navigation behavior.',
-    );
-  };
-
-  const handleAppInformation = () => {
-    Alert.alert(
-      'DailyMart Nepal Delivery Partner',
-      'Version 1.0.0\n\nFrontend demo version.',
-    );
   };
 
   const handleSecurity = () => {
@@ -234,16 +105,20 @@ const SettingsScreen = () => {
             </View>
           ) : null}
 
-          {storageError ? (
+          {preferenceError ? (
             <View style={styles.errorBanner}>
               <Text style={styles.errorBannerText}>
-                Settings storage is unavailable. Changes may not persist
-                after you leave this screen.
+                {preferenceError}
               </Text>
+              {!preferences ? (
+                <Pressable onPress={() => { loadPreferences(); }} accessibilityRole="button">
+                  <Text style={styles.linkText}>Retry</Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
 
-          {isLoaded && !storageError && isSaving ? (
+          {isLoaded && isSaving ? (
             <View style={styles.infoBanner}>
               <Text style={styles.infoBannerText}>
                 Saving preferences…
@@ -283,8 +158,8 @@ const SettingsScreen = () => {
             <SettingSwitchRow
               title="Delivery Notifications"
               description="Save your preference for new delivery and assignment alerts."
-              value={preferences.deliveryNotifications}
-              disabled={!isLoaded}
+              value={preferences?.deliveryNotifications ?? true}
+              disabled={!preferences || !isLoaded || isSaving}
               onValueChange={value =>
                 updatePreference('deliveryNotifications', value)
               }
@@ -295,22 +170,10 @@ const SettingsScreen = () => {
             <SettingSwitchRow
               title="Payment Notifications"
               description="Save your preference for earnings and payment alerts."
-              value={preferences.paymentNotifications}
-              disabled={!isLoaded}
+              value={preferences?.paymentNotifications ?? true}
+              disabled={!preferences || !isLoaded || isSaving}
               onValueChange={value =>
                 updatePreference('paymentNotifications', value)
-              }
-            />
-
-            <Divider />
-
-            <SettingSwitchRow
-              title="Sound Notifications"
-              description="Save your preference for notification sounds."
-              value={preferences.soundNotifications}
-              disabled={!isLoaded}
-              onValueChange={value =>
-                updatePreference('soundNotifications', value)
               }
             />
 
@@ -335,40 +198,6 @@ const SettingsScreen = () => {
             </Pressable>
           </View>
 
-          <Text style={styles.sectionTitle}>Delivery Preferences</Text>
-
-          <View style={styles.card}>
-            <SettingSwitchRow
-              title="Auto-Accept Preference"
-              description="Saved locally for now. Every delivery assignment still requires explicit acceptance."
-              value={preferences.autoAcceptDeliveries}
-              disabled={!isLoaded}
-              onValueChange={value =>
-                updatePreference('autoAcceptDeliveries', value)
-              }
-            />
-
-            <Divider />
-
-            <Pressable
-              style={styles.navigationRow}
-              onPress={handleDeliveryPreferences}
-              accessibilityRole="button"
-              accessibilityLabel="View delivery preference information">
-              <View style={styles.settingContent}>
-                <Text style={styles.settingTitle}>
-                  Delivery Preferences
-                </Text>
-
-                <Text style={styles.settingDescription}>
-                  Learn how assignment preferences work in the current demo.
-                </Text>
-              </View>
-
-              <Text style={styles.rowArrow}>›</Text>
-            </Pressable>
-          </View>
-
           <Text style={styles.sectionTitle}>App Security</Text>
 
           <View style={styles.card}>
@@ -386,40 +215,6 @@ const SettingsScreen = () => {
 
                 <Text style={styles.settingDescription}>
                   Manage available app security and account options.
-                </Text>
-              </View>
-
-              <Text style={styles.rowArrow}>›</Text>
-            </Pressable>
-          </View>
-
-          <Text style={styles.sectionTitle}>Location & Navigation</Text>
-
-          <View style={styles.card}>
-            <SettingSwitchRow
-              title="Location Updates Preference"
-              description="Save your preference for location updates. Android permissions and GPS tracking are managed separately."
-              value={preferences.locationUpdates}
-              disabled={!isLoaded}
-              onValueChange={value =>
-                updatePreference('locationUpdates', value)
-              }
-            />
-
-            <Divider />
-
-            <Pressable
-              style={styles.navigationRow}
-              onPress={handleLocationSettings}
-              accessibilityRole="button"
-              accessibilityLabel="View location and navigation information">
-              <View style={styles.settingContent}>
-                <Text style={styles.settingTitle}>
-                  Navigation Settings
-                </Text>
-
-                <Text style={styles.settingDescription}>
-                  Understand the location preference and Mapbox behavior.
                 </Text>
               </View>
 
@@ -480,7 +275,7 @@ const SettingsScreen = () => {
           <View style={styles.card}>
             <Pressable
               style={styles.navigationRow}
-              onPress={handleAppInformation}
+              onPress={() => Alert.alert('DailyMart Nepal Delivery Partner', 'Delivery operations and support for DailyMart Nepal.')}
               accessibilityRole="button"
               accessibilityLabel="View app information">
               <View style={styles.settingContent}>
@@ -504,10 +299,9 @@ const SettingsScreen = () => {
 
           <View style={styles.bottomInfo}>
             <Text style={styles.bottomInfoText}>
-              Preferences are stored locally on this device. They are not
-              synchronized with a backend and do not control push
-              notifications, Android permissions, GPS tracking, or
-              delivery assignment behavior yet.
+              Notification preferences are saved to your DailyMart account.
+              Critical delivery and payment alerts remain visible so you do
+              not miss time-sensitive operational updates.
             </Text>
           </View>
 

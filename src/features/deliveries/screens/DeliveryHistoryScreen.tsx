@@ -72,7 +72,7 @@ function DeliveryHistoryScreen() {
     return historyDeliveries.filter(
       delivery => delivery.status === selectedFilter,
     );
-  }, [selectedFilter]);
+  }, [historyDeliveries, selectedFilter]);
 
   const deliveredCount = historyDeliveries.filter(
     delivery => delivery.status === 'DELIVERED',

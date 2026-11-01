@@ -28,12 +28,13 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
 import {getPartnerNotifications, markPartnerNotificationRead} from '../../../shared/services/api';
+import {useProfile} from '../../profile/context/ProfileContext';
 
 type NotificationType = 'DELIVERY' | 'PICKUP' | 'PAYMENT' | 'SYSTEM';
 
 type NotificationCategory = 'SUPPORT';
 
-type NotificationGroup = 'TODAY' | 'YESTERDAY' | 'THIS_WEEK';
+type NotificationGroup = 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'EARLIER';
 
 type NotificationItem = {
   id: string;
@@ -72,8 +73,6 @@ type BottomNavItemProps = {
   onPress: () => void;
 };
 
-const INITIAL_NOTIFICATIONS: NotificationItem[] = [];
-
 const mapPartnerNotification = (record: {
   _id: string;
   type?: string;
@@ -93,9 +92,13 @@ const mapPartnerNotification = (record: {
   const group: NotificationGroup =
     day.getTime() === today.getTime()
       ? 'TODAY'
-      : day.getTime() === yesterday.getTime()
+    : day.getTime() === yesterday.getTime()
         ? 'YESTERDAY'
-        : 'THIS_WEEK';
+        : (() => {
+            const startOfWeek = new Date(today);
+            startOfWeek.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+            return day >= startOfWeek ? 'THIS_WEEK' : 'EARLIER';
+          })();
   const rawType = String(record.type || '').toLowerCase();
   const title = String(record.title || 'DailyMart update');
   const type: NotificationType =
@@ -106,9 +109,13 @@ const mapPartnerNotification = (record: {
         : rawType.includes('delivery') || rawType.includes('order')
           ? 'DELIVERY'
           : 'SYSTEM';
+  const category: NotificationCategory | undefined = rawType.includes('support')
+    ? 'SUPPORT'
+    : undefined;
   return {
     id: record._id,
     type,
+    category,
     title,
     message: String(record.message || ''),
     time: createdAt.toLocaleString(),
@@ -154,7 +161,7 @@ const matchesFilter = (
       return notification.category === 'SUPPORT';
 
     case 'ALL':
-
+      return true;
     default:
       return true;
   }
@@ -164,14 +171,14 @@ const getUnreadCount = (notifications: NotificationItem[]) => {
   return notifications.filter(notification => !notification.read).length;
 };
 
-const HeaderBell = () => (
+const HeaderBell = ({hasUnread}: {hasUnread: boolean}) => (
   <View style={styles.headerBellButton}>
     <FontAwesomeIcon icon={faBell} size={22} color="#0B604C" />
-    <View style={styles.headerNotificationDot} />
+    {hasUnread ? <View style={styles.headerNotificationDot} /> : null}
   </View>
 );
 
-const ProfileAvatar = ({ onPress }: { onPress: () => void }) => {
+const ProfileAvatar = ({ onPress, initials }: { onPress: () => void; initials: string }) => {
   return (
     <Pressable
       style={styles.profileButton}
@@ -179,7 +186,7 @@ const ProfileAvatar = ({ onPress }: { onPress: () => void }) => {
       accessibilityRole="button"
       accessibilityLabel="Open profile"
     >
-      <Text style={styles.profileText}>SS</Text>
+      <Text style={styles.profileText}>{initials}</Text>
 
       <View style={styles.onlineDot} />
     </Pressable>
@@ -425,8 +432,10 @@ const BottomNavItem = ({
 
 const NotificationsScreen = () => {
   const navigation = useNavigation<NotificationsNavigationProp>();
+  const {profile} = useProfile();
+  const initials = profile.fullName.trim().split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'DP';
 
-  const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -474,6 +483,9 @@ const NotificationsScreen = () => {
   const thisWeekNotifications = filteredNotifications.filter(
     notification => notification.group === 'THIS_WEEK',
   );
+  const earlierNotifications = filteredNotifications.filter(
+    notification => notification.group === 'EARLIER',
+  );
 
   const handleGoHome = () => {
     navigation.navigate('Home');
@@ -491,32 +503,37 @@ const NotificationsScreen = () => {
     navigation.navigate('Profile');
   };
 
-  const handleNotificationPress = (notification: NotificationItem) => {
+  const handleNotificationPress = async (notification: NotificationItem) => {
+    let read = notification.read;
     if (!notification.read) {
-      markPartnerNotificationRead(notification.id).catch(error =>
-        Alert.alert('Could not update notification', error instanceof Error ? error.message : 'Please retry.'),
-      );
+      try {
+        await markPartnerNotificationRead(notification.id);
+        read = true;
+      } catch (error) {
+        Alert.alert('Could not update notification', error instanceof Error ? error.message : 'Please retry.');
+      }
     }
-    setNotifications(current =>
-      current.map(item => item.id === notification.id ? {...item, read: true} : item),
-    );
+    if (read) setNotifications(current => current.map(item => item.id === notification.id ? {...item, read: true} : item));
     navigation.navigate('NotificationDetails', {
       title: notification.title,
       message: notification.message,
       time: notification.time,
       type: notification.type,
       deliveryId: notification.deliveryId,
-      read: true,
+      read,
     });
   };
 
-  const handleMarkAllAsRead = () => {
+  const handleMarkAllAsRead = async () => {
     if (unreadCount === 0) return;
     const unread = notifications.filter(notification => !notification.read);
     setNotifications(current => current.map(notification => ({...notification, read: true})));
-    Promise.all(unread.map(notification => markPartnerNotificationRead(notification.id))).catch(error =>
-      Alert.alert('Some notifications could not be updated', error instanceof Error ? error.message : 'Please retry.'),
-    );
+    const results = await Promise.allSettled(unread.map(notification => markPartnerNotificationRead(notification.id)));
+    const failedIds = unread.filter((_notification, index) => results[index].status === 'rejected').map(notification => notification.id);
+    if (failedIds.length) {
+      setNotifications(current => current.map(notification => failedIds.includes(notification.id) ? {...notification, read: false} : notification));
+      Alert.alert('Some notifications could not be updated', `${failedIds.length} notification${failedIds.length === 1 ? '' : 's'} remain unread. Retry when your connection is available.`);
+    }
   };
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -547,9 +564,9 @@ const NotificationsScreen = () => {
             </View>
 
             <View style={styles.headerActions}>
-              <HeaderBell />
+              <HeaderBell hasUnread={unreadCount > 0} />
 
-              <ProfileAvatar onPress={handleGoProfile} />
+              <ProfileAvatar onPress={handleGoProfile} initials={initials} />
             </View>
           </View>
 
@@ -634,6 +651,12 @@ const NotificationsScreen = () => {
             <NotificationSection
               title="This Week"
               notifications={thisWeekNotifications}
+              onNotificationPress={handleNotificationPress}
+            />
+
+            <NotificationSection
+              title="Earlier"
+              notifications={earlierNotifications}
               onNotificationPress={handleNotificationPress}
             />
 

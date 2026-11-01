@@ -1,24 +1,44 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {Platform} from 'react-native';
+import {NativeModules, Platform} from 'react-native';
 import {API_ORIGIN} from '../config/apiOrigin';
 
 const TOKEN_KEY = 'dailymart.deliveryPartnerToken';
+const TOKEN_EXPIRY_KEY = 'dailymart.deliveryPartnerTokenExpiresAt';
+const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 const configuredBaseUrl = (
   globalThis as typeof globalThis & {__DAILYMART_API_BASE_URL__?: string}
 ).__DAILYMART_API_BASE_URL__;
-// Android emulator reaches the host machine at 10.0.2.2; iOS simulator uses localhost.
-// For a physical phone, set this to the computer's reachable LAN URL, e.g. http://192.168.1.20:5000.
-const developmentHostOverride = '';
+function getDevelopmentApiOrigin() {
+  if (Platform.OS !== 'android') return 'http://localhost:5000';
+
+  // React Native's bundle URL tells us which host the device can reach. This
+  // handles both emulator networking (10.0.2.2) and a physical phone using
+  // Metro over Wi-Fi or an adb reverse tunnel (localhost).
+  try {
+    const scriptURL = NativeModules.SourceCode?.getConstants?.().scriptURL;
+    if (typeof scriptURL === 'string') {
+      const host = new URL(scriptURL).hostname;
+      if (host) return `http://${host}:5000`;
+    }
+  } catch {
+    // Fall back to the standard Android emulator host when Metro URL is absent.
+  }
+
+  return 'http://10.0.2.2:5000';
+}
+
 const API_BASE_URL = (
   configuredBaseUrl?.trim() ||
-  API_ORIGIN.trim() ||
-  developmentHostOverride ||
-  (Platform.OS === 'android'
-    ? 'http://10.0.2.2:5000'
-    : 'http://localhost:5000')
+  (__DEV__ ? getDevelopmentApiOrigin() : API_ORIGIN.trim())
 ).replace(/\/+$/, '');
 
 async function fetchBackend(url: string, options: RequestInit): Promise<Response> {
+  if (!API_BASE_URL) {
+    throw new Error(
+      'DailyMart API URL is not configured. Set DAILYMART_API_BASE_URL to the HTTPS backend URL before building the app.',
+    );
+  }
+
   try {
     return await fetch(url, options);
   } catch {
@@ -32,6 +52,7 @@ export type Partner = {
   _id: string;
   name: string;
   phone: string;
+  profileImage?: {url?: string; publicId?: string} | null;
   partnerCode?: string;
   warehouse?: { _id: string; name: string; warehouseCode?: string; city?: string };
   availabilityStatus: 'offline' | 'online' | 'busy';
@@ -82,6 +103,16 @@ export type OrderRecord = {
 };
 type ApiResult<T> = { success: boolean } & T;
 
+export class ApiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -103,9 +134,9 @@ async function request<T>(
     body = {};
   }
   if (!response.ok || !body.success) {
-    throw new Error(
-      body.message ||
-        `DailyMart API request failed (${response.status}). Check that the backend is running at ${API_BASE_URL}.`,
+    throw new ApiRequestError(
+      body.message || `DailyMart API request failed (${response.status}).`,
+      response.status,
     );
   }
   return body as ApiResult<T>;
@@ -124,29 +155,52 @@ export async function loginPartner(phone: string, password: string) {
     body = {};
   }
   if (!response.ok || !body.success || !body.token) {
-    throw new Error(
-      body.message ||
-        `Login request failed (${response.status}). Check the backend connection and your credentials.`,
+    throw new ApiRequestError(
+      body.message || `Login request failed (${response.status}).`,
+      response.status,
     );
   }
-  await AsyncStorage.setItem(TOKEN_KEY, body.token);
+  const serverExpiry = typeof body.expiresAt === 'number'
+    ? body.expiresAt
+    : Date.parse(String(body.expiresAt || ''));
+  const expiresAt = Number.isFinite(serverExpiry) && serverExpiry > Date.now()
+    ? serverExpiry
+    : Date.now() + SESSION_DURATION_MS;
+  await AsyncStorage.multiSet([
+    [TOKEN_KEY, body.token],
+    [TOKEN_EXPIRY_KEY, String(expiresAt)],
+  ]);
   return body.partner as Partner;
 }
 
 export async function restorePartnerSession() {
   const token = await AsyncStorage.getItem(TOKEN_KEY);
   if (!token) return null;
+  const expiresAt = Number(await AsyncStorage.getItem(TOKEN_EXPIRY_KEY));
+  // Tokens created before local expiry tracking was added require a fresh sign-in.
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    await logoutPartner();
+    return null;
+  }
   try {
     const result = await request<{partner: Partner}>('/me');
     return result.partner;
-  } catch {
-    await AsyncStorage.removeItem(TOKEN_KEY);
-    return null;
+  } catch (error) {
+    if (error instanceof ApiRequestError && [401, 403].includes(error.status)) {
+      await AsyncStorage.removeItem(TOKEN_KEY);
+      return null;
+    }
+    throw error;
   }
 }
 
 export async function logoutPartner() {
-  await AsyncStorage.removeItem(TOKEN_KEY);
+  await AsyncStorage.multiRemove([TOKEN_KEY, TOKEN_EXPIRY_KEY]);
+}
+
+export async function getPartnerSessionExpiresAt() {
+  const expiresAt = Number(await AsyncStorage.getItem(TOKEN_EXPIRY_KEY));
+  return Number.isFinite(expiresAt) ? expiresAt : null;
 }
 
 export type PartnerNotification = {
@@ -180,6 +234,32 @@ export const updatePartnerProfile = async (profile: {
     body: JSON.stringify(profile),
   })).partner;
 
+export const uploadPartnerProfileImage = async (
+  file: {uri: string; name: string; type: string},
+) => {
+  const token = await AsyncStorage.getItem(TOKEN_KEY);
+  const formData = new FormData();
+  formData.append('profileImage', file as any);
+  const response = await fetchBackend(`${API_BASE_URL}/api/delivery-partner/profile/image`, {
+    method: 'POST',
+    headers: {Accept: 'application/json', ...(token ? {Authorization: `Bearer ${token}`} : {})},
+    body: formData,
+  });
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    body = {};
+  }
+  if (!response.ok || !body.success || !body.partner) {
+    throw new ApiRequestError(
+      body.message || `Profile photo upload failed (${response.status}).`,
+      response.status,
+    );
+  }
+  return body.partner as Partner;
+};
+
 export const getDeliveries = async () =>
   (await request<{deliveries: OrderRecord[]}>('/deliveries')).deliveries;
 
@@ -209,8 +289,160 @@ export const finishDelivery = async (orderId: string) =>
 export const failDelivery = async (orderId: string, reason: string) =>
   request<{order: OrderRecord}>(`/deliveries/${encodeURIComponent(orderId)}/failed`, {method: 'POST', body: JSON.stringify({reason})});
 
+export type PartnerSupportTicket = {
+  id: string;
+  reference: string;
+  subject: string;
+  category: string;
+  priority: 'Low' | 'Medium' | 'High' | 'Urgent';
+  status: 'Open' | 'In Progress' | 'Waiting for Customer' | 'Resolved' | 'Closed';
+  description: string;
+  order?: {id: string | null; reference: string; status?: string} | null;
+  resolution: string;
+  messages: Array<{id: string; authorType: string; authorName: string; body: string; createdAt: string}>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const supportRequest = async <T>(path: string, options: RequestInit = {}): Promise<ApiResult<T>> => {
+  const token = await AsyncStorage.getItem(TOKEN_KEY);
+  const response = await fetchBackend(`${API_BASE_URL}/api/support/delivery-partner${path}`, {
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(token ? {Authorization: `Bearer ${token}`} : {}),
+      ...options.headers,
+    },
+  });
+  let body: any;
+  try { body = await response.json(); } catch { body = {}; }
+  if (!response.ok || !body.success) {
+    throw new Error(body.message || `Support request failed (${response.status}).`);
+  }
+  return body as ApiResult<T>;
+};
+
+export const getPartnerSupportTickets = async () =>
+  (await supportRequest<{supportRequests: PartnerSupportTicket[]}>('', {method: 'GET'})).supportRequests;
+
+export const createPartnerSupportTicket = async (input: {
+  category: string;
+  priority: 'Low' | 'Medium' | 'High' | 'Urgent';
+  subject: string;
+  description: string;
+  orderReference?: string;
+  isEmergency?: boolean;
+}) =>
+  (await supportRequest<{supportRequest: PartnerSupportTicket}>('', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })).supportRequest;
+
+export const replyToPartnerSupportTicket = async (ticketId: string, body: string) =>
+  (await supportRequest<{supportRequest: PartnerSupportTicket}>(`/${encodeURIComponent(ticketId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({body}),
+  })).supportRequest;
+
 export const setAvailability = async (isOnline: boolean) =>
   (await request<{partner: Partner}>('/availability', {method: 'PATCH', body: JSON.stringify({isOnline})})).partner;
 
 export const updatePartnerLocation = async (latitude: number, longitude: number) =>
   request<{partner: Partner}>('/location', {method: 'PATCH', body: JSON.stringify({latitude, longitude})});
+
+export type PartnerEarningTransaction = {
+  id: string;
+  reference: string;
+  amount: number;
+  date: string;
+  transferReference: string;
+  notes: string;
+};
+
+export type PartnerEarnings = {
+  period: 'today' | 'week' | 'month' | 'all';
+  paidOutAllTime: number;
+  allTimePayoutCount: number;
+  paidOutInPeriod: number;
+  periodPayoutCount: number;
+  payoutRateConfigured: boolean;
+  walletBalance: number | null;
+  transactions: PartnerEarningTransaction[];
+};
+
+export const getPartnerEarnings = async (period: PartnerEarnings['period'] = 'month') =>
+  request<PartnerEarnings>(`/earnings?period=${encodeURIComponent(period)}`);
+
+export type PartnerPreferences = {
+  deliveryNotifications: boolean;
+  paymentNotifications: boolean;
+};
+
+export const getPartnerPreferences = async () =>
+  (await request<{preferences: PartnerPreferences}>('/preferences')).preferences;
+
+export const updatePartnerPreferences = async (preferences: Partial<PartnerPreferences>) =>
+  (await request<{preferences: PartnerPreferences}>('/preferences', {
+    method: 'PATCH',
+    body: JSON.stringify(preferences),
+  })).preferences;
+
+export type PartnerLoginActivity = {
+  _id: string;
+  device: string;
+  network: string;
+  signedInAt: string;
+};
+
+export const getPartnerLoginActivity = async () =>
+  (await request<{activities: PartnerLoginActivity[]}>('/security/activity')).activities;
+
+export const changePartnerPassword = async (currentPassword: string, newPassword: string) =>
+  request<never>('/security/password', {
+    method: 'PATCH',
+    body: JSON.stringify({currentPassword, newPassword}),
+  });
+
+export const revokePartnerSessions = async () =>
+  request<never>('/security/logout-all', {method: 'POST', body: '{}'});
+
+export type PartnerDocumentType = 'DL' | 'CID' | 'VR' | 'INS';
+export type PartnerDocumentStatus = 'pending' | 'verified' | 'rejected';
+export type PartnerDocument = {
+  _id: string;
+  documentType: PartnerDocumentType;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  status: PartnerDocumentStatus;
+  reviewNote: string;
+  reviewedAt?: string | null;
+  updatedAt: string;
+};
+
+export const getPartnerDocuments = async () =>
+  (await request<{documents: PartnerDocument[]}>('/documents')).documents;
+
+export const uploadPartnerDocument = async (
+  documentType: PartnerDocumentType,
+  file: {uri: string; name: string; type: string},
+) => {
+  const token = await AsyncStorage.getItem(TOKEN_KEY);
+  const formData = new FormData();
+  formData.append('file', file as any);
+  const response = await fetchBackend(
+    `${API_BASE_URL}/api/delivery-partner/documents/${encodeURIComponent(documentType)}`,
+    {
+      method: 'POST',
+      headers: {Accept: 'application/json', ...(token ? {Authorization: `Bearer ${token}`} : {})},
+      body: formData,
+    },
+  );
+  let body: any;
+  try { body = await response.json(); } catch { body = {}; }
+  if (!response.ok || !body.success || !body.document) {
+    throw new Error(body.message || `Document upload failed (${response.status}).`);
+  }
+  return body.document as PartnerDocument;
+};
