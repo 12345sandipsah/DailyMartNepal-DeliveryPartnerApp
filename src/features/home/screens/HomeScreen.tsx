@@ -1,6 +1,7 @@
 import React, {useState} from 'react';
 import {
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,7 +14,6 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {FontAwesomeIcon} from '@fortawesome/react-native-fontawesome';
 import {
   faBell,
-  faUser,
   faWallet,
   faBox,
   faStar,
@@ -21,7 +21,6 @@ import {
   faArrowRight,
   faHeadset,
   faTriangleExclamation,
-  faHouse,
   faChevronRight,
   faTruck,
   faCircleInfo,
@@ -29,6 +28,9 @@ import {
   faRoute,
 } from '@fortawesome/free-solid-svg-icons';
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
+import ProfileAvatarButton from '../../../shared/components/ProfileAvatarButton';
+import PartnerBrand from '../../../shared/components/PartnerBrand';
+import PartnerBottomNavigation from '../../../shared/components/PartnerBottomNavigation';
 import {
   getDeliveries,
   getPartner,
@@ -39,6 +41,7 @@ import {
   PartnerNotification,
   setAvailability,
 } from '../../../shared/services/api';
+import {useProfile} from '../../profile/context/ProfileContext';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<
   MainStackParamList,
@@ -61,6 +64,7 @@ const COLORS = {
 
 function HomeScreen() {
   const navigation = useNavigation<HomeScreenNavigationProp>();
+  const {profile} = useProfile();
   const [isOnline, setIsOnline] = useState(false);
   const [partnerOrders, setPartnerOrders] = useState<OrderRecord[]>([]);
   const [recentNotifications, setRecentNotifications] = useState<PartnerNotification[]>([]);
@@ -97,10 +101,6 @@ function HomeScreen() {
 
   const handleViewDeliveryHistory = () => {
     navigation.navigate('DeliveryHistory');
-  };
-
-  const handleViewEarnings = () => {
-    navigation.navigate('Earnings');
   };
 
   const handleViewNotifications = () => {
@@ -156,7 +156,7 @@ function HomeScreen() {
   return (
     <SafeAreaView
       style={styles.safeArea}
-      edges={['top', 'left', 'right', 'bottom']}>
+      edges={['top', 'left', 'right']}>
       <View style={styles.mainContainer}>
         <ScrollView
           style={styles.scrollView}
@@ -166,15 +166,7 @@ function HomeScreen() {
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.brandSection}>
-              <View style={styles.brandRow}>
-                <View style={styles.logoTextContainer}>
-                  <Text style={styles.logoText}>
-                    <Text style={styles.logoDaily}>Daily</Text>
-                    <Text style={styles.logoMart}>Mart</Text>
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.partnerText}>Delivery Partner</Text>
+              <PartnerBrand />
             </View>
 
             <View style={styles.headerActions}>
@@ -191,18 +183,11 @@ function HomeScreen() {
                 {recentNotifications.some(notification => !notification.isRead) ? <View style={styles.notificationDot} /> : null}
               </Pressable>
 
-              <Pressable
-                style={styles.profileButton}
+              <ProfileAvatarButton
+                imageUri={profile.profileImage?.url}
+                name={profile.fullName}
                 onPress={handleViewProfile}
-                accessibilityRole="button"
-                accessibilityLabel="Open profile">
-                <FontAwesomeIcon
-                  icon={faUser}
-                  size={21}
-                  color={COLORS.darkGreen}
-                />
-                <View style={styles.profileOnlineDot} />
-              </Pressable>
+              />
             </View>
           </View>
 
@@ -539,82 +524,7 @@ function HomeScreen() {
           </View>
         </ScrollView>
 
-        {/* Bottom navigation */}
-        <View style={styles.bottomNavigation}>
-          <Pressable
-            style={styles.bottomNavItem}
-            accessibilityRole="button"
-            accessibilityState={{selected: true}}
-            accessibilityLabel="Home">
-            <FontAwesomeIcon
-              icon={faHouse}
-              size={21}
-              color={COLORS.green}
-            />
-            <Text
-              style={[
-                styles.bottomNavLabel,
-                styles.bottomNavLabelActive,
-              ]}>
-              Home
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={styles.bottomNavItem}
-            onPress={handleViewDeliveries}
-            accessibilityRole="button"
-            accessibilityLabel="Deliveries">
-            <FontAwesomeIcon
-              icon={faBox}
-              size={21}
-              color="#737A7D"
-            />
-            <Text style={styles.bottomNavLabel}>Deliveries</Text>
-          </Pressable>
-
-          <Pressable
-            style={styles.bottomNavItem}
-            onPress={handleViewEarnings}
-            accessibilityRole="button"
-            accessibilityLabel="Earnings">
-            <FontAwesomeIcon
-              icon={faWallet}
-              size={21}
-              color="#737A7D"
-            />
-            <Text style={styles.bottomNavLabel}>Earnings</Text>
-          </Pressable>
-
-          <Pressable
-            style={styles.bottomNavItem}
-            onPress={handleViewNotifications}
-            accessibilityRole="button"
-            accessibilityLabel="Notifications">
-            <View style={styles.bottomBellIcon}>
-              <FontAwesomeIcon
-                icon={faBell}
-                size={21}
-                color="#737A7D"
-              />
-              <View style={styles.bottomNotificationDot} />
-            </View>
-            <Text style={styles.bottomNavLabel}>Notifications</Text>
-          </Pressable>
-
-          <Pressable
-            style={styles.bottomNavItem}
-            onPress={handleViewProfile}
-            accessibilityRole="button"
-            accessibilityLabel="Profile">
-            <FontAwesomeIcon
-              icon={faUser}
-              size={21}
-              color="#737A7D"
-            />
-            <Text style={styles.bottomNavLabel}>Profile</Text>
-          </Pressable>
-        </View>
+        <PartnerBottomNavigation activeRoute="Home" />
       </View>
     </SafeAreaView>
   );
@@ -645,32 +555,8 @@ const styles = StyleSheet.create({
   },
   brandSection: {
     flex: 1,
-  },
-  brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  logoTextContainer: {
-    alignItems: 'flex-start',
-  },
-  logoText: {
-    fontSize: 28,
-    lineHeight: 31,
-    fontWeight: '800',
-    letterSpacing: -1,
-  },
-  logoDaily: {
-    color: COLORS.darkGreen,
-  },
-  logoMart: {
-    color: '#20B94E',
-  },
-  partnerText: {
-    marginTop: 3,
-    marginLeft: 4,
-    fontSize: 15,
-    color: '#39725D',
-    fontWeight: '600',
   },
   headerActions: {
     flexDirection: 'row',
@@ -693,26 +579,6 @@ const styles = StyleSheet.create({
     height: 11,
     borderRadius: 6,
     backgroundColor: COLORS.red,
-    borderWidth: 2,
-    borderColor: COLORS.white,
-  },
-  profileButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    backgroundColor: '#E4F0E8',
-  },
-  profileOnlineDot: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 13,
-    height: 13,
-    borderRadius: 7,
-    backgroundColor: '#21B34B',
     borderWidth: 2,
     borderColor: COLORS.white,
   },
@@ -1221,50 +1087,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#EEF0EE',
     marginHorizontal: 12,
-  },
-  bottomNavigation: {
-    minHeight: 76,
-    backgroundColor: COLORS.white,
-    borderTopWidth: 1,
-    borderTopColor: '#E7EAE8',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingHorizontal: 3,
-    paddingTop: 5,
-  },
-  bottomNavItem: {
-    flex: 1,
-    minHeight: 66,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bottomNavLabel: {
-    marginTop: 5,
-    fontSize: 10,
-    lineHeight: 14,
-    color: '#737A7D',
-    fontWeight: '500',
-  },
-  bottomNavLabelActive: {
-    color: '#078F45',
-    fontWeight: '800',
-  },
-  bottomBellIcon: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bottomNotificationDot: {
-    position: 'absolute',
-    top: -2,
-    right: -4,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: COLORS.red,
-    borderWidth: 1,
-    borderColor: COLORS.white,
   },
 });
 

@@ -2,6 +2,18 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// ADB reverse mappings disappear when the device reconnects. Recreate the
+// local API tunnel on every Android build, including builds started in Android Studio.
+def deliveryPartnerAppRoot = rootProject.projectDir.parentFile
+def apiForwardingScript = new File(deliveryPartnerAppRoot, "scripts/reverse-local-api.js")
+def configureLocalApiForwarding = tasks.register("configureLocalApiForwarding", Exec) {
+    workingDir deliveryPartnerAppRoot
+    commandLine "node", apiForwardingScript.absolutePath
+}
+tasks.named("preBuild").configure {
+    dependsOn(configureLocalApiForwarding)
+}
+
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.

@@ -9,13 +9,10 @@ import {
   faCircleInfo,
   faCreditCard,
   faGift,
-  faHouse,
   faMapLocationDot,
   faMoneyBillWave,
-  faTruck,
   faWarehouse,
   faHeadset,
-  faUser,
 } from '@fortawesome/free-solid-svg-icons';
 
 import {Alert, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
@@ -28,6 +25,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
 import {getPartnerNotifications, markPartnerNotificationRead} from '../../../shared/services/api';
+import ProfileAvatarButton from '../../../shared/components/ProfileAvatarButton';
+import PartnerBottomNavigation from '../../../shared/components/PartnerBottomNavigation';
+import PartnerBrand from '../../../shared/components/PartnerBrand';
 import {useProfile} from '../../profile/context/ProfileContext';
 
 type NotificationType = 'DELIVERY' | 'PICKUP' | 'PAYMENT' | 'SYSTEM';
@@ -62,16 +62,6 @@ type NotificationsNavigationProp = NativeStackNavigationProp<
   MainStackParamList,
   'Notifications'
 >;
-
-type BottomNavItemProps = {
-  label: 'Home' | 'Deliveries' | 'Earnings' | 'Notifications' | 'Profile';
-
-  active: boolean;
-
-  notification?: boolean;
-
-  onPress: () => void;
-};
 
 const mapPartnerNotification = (record: {
   _id: string;
@@ -177,21 +167,6 @@ const HeaderBell = ({hasUnread}: {hasUnread: boolean}) => (
     {hasUnread ? <View style={styles.headerNotificationDot} /> : null}
   </View>
 );
-
-const ProfileAvatar = ({ onPress, initials }: { onPress: () => void; initials: string }) => {
-  return (
-    <Pressable
-      style={styles.profileButton}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel="Open profile"
-    >
-      <Text style={styles.profileText}>{initials}</Text>
-
-      <View style={styles.onlineDot} />
-    </Pressable>
-  );
-};
 
 const NotificationIcon = ({
   notification,
@@ -368,72 +343,9 @@ const FilterPill = ({
   </Pressable>
 );
 
-const BottomNavIcon = ({
-  label,
-  active,
-}: {
-  label: 'Home' | 'Deliveries' | 'Earnings' | 'Notifications' | 'Profile';
-  active: boolean;
-}) => {
-  const icon =
-    label === 'Home'
-      ? faHouse
-      : label === 'Deliveries'
-      ? faTruck
-      : label === 'Earnings'
-      ? faCreditCard
-      : label === 'Notifications'
-      ? faBell
-      : faUser;
-  return (
-    <View style={styles.navIconBox}>
-      <FontAwesomeIcon
-        icon={icon}
-        size={21}
-        color={active ? '#079447' : '#697277'}
-      />
-    </View>
-  );
-};
-
-const BottomNavItem = ({
-  label,
-
-  active,
-
-  notification,
-
-  onPress,
-}: BottomNavItemProps) => {
-  return (
-    <Pressable
-      style={styles.bottomNavItem}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{
-        selected: active,
-      }}
-    >
-      <View style={styles.bottomIconWrapper}>
-        <BottomNavIcon label={label} active={active} />
-
-        {notification && <View style={styles.bottomNotificationDot} />}
-      </View>
-
-      <Text
-        style={[styles.bottomNavLabel, active && styles.bottomNavLabelActive]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-};
-
 const NotificationsScreen = () => {
   const navigation = useNavigation<NotificationsNavigationProp>();
   const {profile} = useProfile();
-  const initials = profile.fullName.trim().split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'DP';
 
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
@@ -487,18 +399,6 @@ const NotificationsScreen = () => {
     notification => notification.group === 'EARLIER',
   );
 
-  const handleGoHome = () => {
-    navigation.navigate('Home');
-  };
-
-  const handleGoDeliveries = () => {
-    navigation.navigate('Deliveries');
-  };
-
-  const handleGoEarnings = () => {
-    navigation.navigate('Earnings');
-  };
-
   const handleGoProfile = () => {
     navigation.navigate('Profile');
   };
@@ -544,29 +444,16 @@ const NotificationsScreen = () => {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
-            <View style={styles.brandContainer}>
-              <View style={styles.brandRow}>
-                <View style={styles.leafIcon}>
-                  <Text style={styles.leafIconText}>◢</Text>
-                </View>
-
-                <View>
-                  <Text style={styles.brandText}>
-                    Daily
-                    <Text style={styles.brandGreen}>Mart</Text>
-                  </Text>
-
-                  <Text style={styles.nepalText}>Nepal</Text>
-
-                  <Text style={styles.partnerText}>Delivery Partner</Text>
-                </View>
-              </View>
-            </View>
+            <PartnerBrand style={styles.brandContainer} />
 
             <View style={styles.headerActions}>
               <HeaderBell hasUnread={unreadCount > 0} />
 
-              <ProfileAvatar onPress={handleGoProfile} initials={initials} />
+              <ProfileAvatarButton
+                imageUri={profile.profileImage?.url}
+                name={profile.fullName}
+                onPress={handleGoProfile}
+              />
             </View>
           </View>
 
@@ -678,34 +565,7 @@ const NotificationsScreen = () => {
           <View style={styles.bottomScrollSpace} />
         </ScrollView>
 
-        <View style={styles.bottomNavigation}>
-          <BottomNavItem label="Home" active={false} onPress={handleGoHome} />
-
-          <BottomNavItem
-            label="Deliveries"
-            active={false}
-            onPress={handleGoDeliveries}
-          />
-
-          <BottomNavItem
-            label="Earnings"
-            active={false}
-            onPress={handleGoEarnings}
-          />
-
-          <BottomNavItem
-            label="Notifications"
-            active={true}
-            notification
-            onPress={() => {}}
-          />
-
-          <BottomNavItem
-            label="Profile"
-            active={false}
-            onPress={handleGoProfile}
-          />
-        </View>
+        <PartnerBottomNavigation activeRoute="Notifications" />
       </View>
     </SafeAreaView>
   );
@@ -906,50 +766,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
 
     backgroundColor: '#F04444',
-
-    borderWidth: 2,
-
-    borderColor: '#FFFFFF',
-  },
-
-  profileButton: {
-    width: 46,
-
-    height: 46,
-
-    borderRadius: 23,
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-
-    backgroundColor: '#DDEDE3',
-
-    position: 'relative',
-  },
-
-  profileText: {
-    fontSize: 14,
-
-    fontWeight: '800',
-
-    color: '#07553E',
-  },
-
-  onlineDot: {
-    position: 'absolute',
-
-    right: -1,
-
-    bottom: 0,
-
-    width: 12,
-
-    height: 12,
-
-    borderRadius: 6,
-
-    backgroundColor: '#21B34B',
 
     borderWidth: 2,
 
@@ -1638,98 +1454,6 @@ const styles = StyleSheet.create({
     color: '#737B80',
 
     textAlign: 'center',
-  },
-
-  bottomNavigation: {
-    height: 73,
-
-    paddingHorizontal: 4,
-
-    paddingTop: 4,
-
-    paddingBottom: 4,
-
-    backgroundColor: '#FFFFFF',
-
-    borderTopWidth: 1,
-
-    borderTopColor: '#E7EAE8',
-
-    flexDirection: 'row',
-
-    alignItems: 'center',
-
-    justifyContent: 'space-around',
-  },
-
-  bottomNavItem: {
-    flex: 1,
-
-    height: 64,
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-  },
-
-  bottomIconWrapper: {
-    width: 29,
-
-    height: 28,
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-
-    position: 'relative',
-  },
-
-  bottomNavLabel: {
-    marginTop: 4,
-
-    fontSize: 9,
-
-    lineHeight: 12,
-
-    color: '#697277',
-
-    fontWeight: '600',
-  },
-
-  bottomNavLabelActive: {
-    color: '#079447',
-
-    fontWeight: '800',
-  },
-
-  bottomNotificationDot: {
-    position: 'absolute',
-
-    top: -1,
-
-    right: 1,
-
-    width: 9,
-
-    height: 9,
-
-    borderRadius: 5,
-
-    backgroundColor: '#F04444',
-
-    borderWidth: 1.5,
-
-    borderColor: '#FFFFFF',
-  },
-
-  navIconBox: {
-    width: 24,
-
-    height: 24,
-
-    alignItems: 'center',
-
-    justifyContent: 'flex-end',
   },
 
   homeIconRoof: {

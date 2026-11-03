@@ -4,6 +4,7 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 
 import WelcomeScreen from '../../features/auth/screens/WelcomeScreen';
 import LoginScreen from '../../features/auth/screens/LoginScreen';
+import type {Partner} from '../../shared/services/api';
 
 export type AuthStackParamList = {
   Welcome: undefined;
@@ -11,7 +12,7 @@ export type AuthStackParamList = {
 };
 
 type AuthNavigatorProps = {
-  onAuthenticated?: () => void;
+  onAuthenticated?: (partner: Partner) => void;
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();

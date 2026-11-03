@@ -98,10 +98,14 @@ const ProfileContext =
 
 export const ProfileProvider = ({
   children,
+  initialPartner,
 }: {
   children: React.ReactNode;
+  initialPartner?: Partner | null;
 }) => {
-  const [profile, setProfile] = useState<ProfileData>(EMPTY_PROFILE);
+  const [profile, setProfile] = useState<ProfileData>(() =>
+    initialPartner ? mapPartnerToProfile(initialPartner) : EMPTY_PROFILE,
+  );
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshProfile = useCallback(async () => {

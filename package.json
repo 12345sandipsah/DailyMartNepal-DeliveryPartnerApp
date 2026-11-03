@@ -3,9 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "android": "adb reverse tcp:5000 tcp:5000 && react-native run-android",
+    "preandroid": "node scripts/reverse-local-api.js",
+    "android": "react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
+    "prestart": "node scripts/reverse-local-api.js",
     "start": "react-native start",
     "test": "jest"
   },

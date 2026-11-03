@@ -33,24 +33,27 @@ import UploadDocumentScreen from '../../features/profile/screens/UploadDocumentS
 import VehicleDetailsScreen from '../../features/profile/screens/VehicleDetailsScreen';
 
 import EarningsScreen from '../../features/earnings/screens/EarningsScreen';
+import PayoutAccountScreen from '../../features/earnings/screens/PayoutAccountScreen';
 import SettingsScreen from '../../features/settings/screens/SettingsScreen';
 
 import SecurityScreen from '../../features/security/screens/SecurityScreen';
 
 import {SupportTicketProvider} from '../../features/support/context/SupportTicketContext';
 import {logoutPartner} from '../../shared/services/api';
+import type {Partner} from '../../shared/services/api';
 import {ProfileProvider} from '../../features/profile/context/ProfileContext';
 import {DocumentsProvider} from '../../features/profile/context/DocumentsContext';
 
 export type MainStackParamList = {
   Home: undefined;
   Profile: undefined;
-  EditProfile: undefined;
+  EditProfile: {readOnly?: boolean} | undefined;
   Documents: undefined;
   VehicleDetails: undefined;
   DocumentDetails: {documentId: string};
   UploadDocument: {documentId: string};
   Earnings: undefined;
+  PayoutAccount: undefined;
   Settings: undefined;
   Security: undefined;
   Deliveries: undefined;
@@ -81,13 +84,14 @@ export type MainStackParamList = {
 
 type MainNavigatorProps = {
   onLogout: () => void;
+  initialPartner: Partner | null;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
-const MainNavigator = ({onLogout}: MainNavigatorProps) => {
+const MainNavigator = ({onLogout, initialPartner}: MainNavigatorProps) => {
   return (
-    <ProfileProvider>
+    <ProfileProvider initialPartner={initialPartner}>
       <DocumentsProvider>
         <SupportTicketProvider>
           <Stack.Navigator
@@ -115,6 +119,7 @@ const MainNavigator = ({onLogout}: MainNavigatorProps) => {
             />
 
             <Stack.Screen name="Earnings" component={EarningsScreen} />
+            <Stack.Screen name="PayoutAccount" component={PayoutAccountScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
             <Stack.Screen
               name="Security"

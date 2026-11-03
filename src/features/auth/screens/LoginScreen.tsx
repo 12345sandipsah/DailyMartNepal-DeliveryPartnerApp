@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {Alert} from 'react-native';
-import {loginPartner} from '../../../shared/services/api';
+import {loginPartner, type Partner} from '../../../shared/services/api';
+import PartnerLogo from '../../../shared/components/PartnerLogo';
 
 import {
   Image,
@@ -34,14 +35,12 @@ import { faEyeSlash } from '@fortawesome/free-solid-svg-icons/faEyeSlash';
 
 import { faGlobe } from '@fortawesome/free-solid-svg-icons/faGlobe';
 
-import { faLeaf } from '@fortawesome/free-solid-svg-icons/faLeaf';
-
 import { faLock } from '@fortawesome/free-solid-svg-icons/faLock';
 
 import type { AuthStackParamList } from '../../../app/navigation/AuthNavigator';
 
 type LoginScreenProps = {
-  onAuthenticated?: () => void;
+  onAuthenticated?: (partner: Partner) => void;
 };
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<
@@ -106,8 +105,8 @@ function LoginScreen({ onAuthenticated }: LoginScreenProps) {
 
     setIsSubmitting(true);
     try {
-      await loginPartner(normalizeNepalMobileNumber(phone), password);
-      onAuthenticated?.();
+      const partner = await loginPartner(normalizeNepalMobileNumber(phone), password);
+      onAuthenticated?.(partner);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Unable to sign in.');
     } finally {
@@ -181,26 +180,11 @@ function LoginScreen({ onAuthenticated }: LoginScreenProps) {
           {/* BRAND */}
 
           <View style={styles.brandContainer}>
-            <View style={styles.brandRow}>
-              <View style={styles.logoLeaf}>
-                <FontAwesomeIcon
-                  icon={faLeaf}
-                  size={32}
-                  color="#21B34B"
-                  style={styles.logoLeafIcon}
-                />
-              </View>
-
-              <View>
-                <Text style={styles.logoText}>
-                  <Text style={styles.logoDaily}>Daily</Text>
-
-                  <Text style={styles.logoMart}>Mart</Text>
-                </Text>
-
-                
-              </View>
-            </View>
+            <PartnerLogo
+              width={136}
+              height={136}
+              style={styles.brandLogo}
+            />
 
             <View style={styles.partnerBadge}>
               <Text style={styles.partnerBadgeText}>Delivery Partner</Text>
@@ -558,54 +542,10 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 
-  brandRow: {
-    flexDirection: 'row',
+  brandLogo: {
+    width: 136,
 
-    alignItems: 'center',
-  },
-
-  logoLeaf: {
-    width: 38,
-
-    height: 46,
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-
-    marginRight: 2,
-  },
-
-  logoLeafIcon: {
-    transform: [{ rotate: '-16deg' }],
-  },
-
-  logoText: {
-    fontSize: 33,
-
-    lineHeight: 37,
-
-    fontWeight: '800',
-
-    letterSpacing: -1,
-  },
-
-  logoDaily: {
-    color: '#07553E',
-  },
-
-  logoMart: {
-    color: '#20B94E',
-  },
-
-  logoNepal: {
-    fontSize: 17,
-
-    textAlign: 'right',
-
-    fontWeight: '600',
-
-    color: '#07553E',
+    height: 136,
   },
 
   partnerBadge: {

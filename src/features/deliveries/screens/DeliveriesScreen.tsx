@@ -19,7 +19,6 @@ import {
   faCircleCheck,
   faClock,
   faFilter,
-  faLeaf,
   faLocationDot,
   faMagnifyingGlass,
   faMoneyBillWave,
@@ -34,6 +33,10 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
 import {getDeliveries, getDeliveryHistory, OrderRecord} from '../../../shared/services/api';
+import ProfileAvatarButton from '../../../shared/components/ProfileAvatarButton';
+import PartnerBottomNavigation from '../../../shared/components/PartnerBottomNavigation';
+import PartnerBrand from '../../../shared/components/PartnerBrand';
+import {useProfile} from '../../profile/context/ProfileContext';
 
 type DeliveryStatus =
   | 'ASSIGNED'
@@ -164,6 +167,7 @@ type DeliveriesScreenNavigationProp = NativeStackNavigationProp<
 
 function DeliveriesScreen() {
   const navigation = useNavigation<DeliveriesScreenNavigationProp>();
+  const {profile} = useProfile();
 
   const [selectedFilter, setSelectedFilter] = useState<Filter>('ASSIGNED');
   const [sortNearest, setSortNearest] = useState(true);
@@ -297,23 +301,14 @@ function DeliveriesScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
 
         <View style={styles.brandHeader}>
-          <View style={styles.brandBlock}>
-            <View style={styles.logoRow}>
-              <FontAwesomeIcon icon={faLeaf} size={26} color="#20B94B" />
-
-              <Text style={styles.dailyText}>Daily</Text>
-
-              <Text style={styles.martText}>Mart</Text>
-            </View>
-
-            <Text style={styles.partnerText}>Delivery Partner</Text>
-          </View>
+          <PartnerBrand style={styles.brandBlock} />
 
           <View style={styles.headerActions}>
             <Pressable
@@ -337,15 +332,11 @@ function DeliveriesScreen() {
               <View style={styles.notificationDot} />
             </Pressable>
 
-            <Pressable
-              style={styles.profileAvatar}
-              accessibilityLabel="Profile"
+            <ProfileAvatarButton
+              imageUri={profile.profileImage?.url}
+              name={profile.fullName}
               onPress={() => navigation.navigate('Profile')}
-            >
-              <Text style={styles.profileInitial}>S</Text>
-
-              <View style={styles.onlineDot} />
-            </Pressable>
+            />
           </View>
         </View>
 
@@ -625,6 +616,7 @@ function DeliveriesScreen() {
           </View>
         )}
       </ScrollView>
+      <PartnerBottomNavigation activeRoute="Deliveries" />
     </SafeAreaView>
   );
 }
@@ -634,6 +626,10 @@ const styles = StyleSheet.create({
     flex: 1,
 
     backgroundColor: '#FFFFFF',
+  },
+
+  scrollView: {
+    flex: 1,
   },
 
   content: {
@@ -798,48 +794,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#F04444',
 
     borderWidth: 1,
-
-    borderColor: '#FFFFFF',
-  },
-
-  profileAvatar: {
-    width: 50,
-
-    height: 50,
-
-    borderRadius: 25,
-
-    backgroundColor: '#DCEDE5',
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-  },
-
-  profileInitial: {
-    fontSize: 22,
-
-    fontWeight: '800',
-
-    color: '#075B48',
-  },
-
-  onlineDot: {
-    position: 'absolute',
-
-    right: -1,
-
-    bottom: 1,
-
-    width: 12,
-
-    height: 12,
-
-    borderRadius: 6,
-
-    backgroundColor: '#21B64B',
-
-    borderWidth: 2,
 
     borderColor: '#FFFFFF',
   },

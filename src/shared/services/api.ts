@@ -374,6 +374,86 @@ export type PartnerEarnings = {
 export const getPartnerEarnings = async (period: PartnerEarnings['period'] = 'month') =>
   request<PartnerEarnings>(`/earnings?period=${encodeURIComponent(period)}`);
 
+export type PartnerPayoutAccount = {
+  accountHolderName: string;
+  bankName: string;
+  branchName: string;
+  branchCode: string;
+  accountType: 'Savings' | 'Current';
+  accountNumber: string;
+  accountNumberLast4: string;
+  verificationStatus: 'unverified' | 'verified' | 'review_required' | 'rejected' | 'service_unavailable' | 'admin_approved' | 'admin_rejected';
+  verificationProvider: string;
+  verificationResponseCode: string;
+  verificationMatchPercentage: number | null;
+  verificationMessage: string;
+  verificationCheckedAt: string | null;
+  verificationReviewNote?: string;
+  isComplete: boolean;
+};
+
+export type PartnerBank = {id: string; shortCode: string; name: string};
+export type PartnerBankBranch = {id: string; name: string};
+
+export const getPartnerBanks = async () =>
+  (await request<{banks: PartnerBank[]}>('/bank-directory/banks')).banks;
+
+export const getPartnerBankBranches = async (bankCode: string) =>
+  (await request<{branches: PartnerBankBranch[]}>(`/bank-directory/banks/${encodeURIComponent(bankCode)}/branches`)).branches;
+
+export const getPartnerPayoutAccount = async () =>
+  (await request<{payoutAccount: PartnerPayoutAccount}>('/payout-account')).payoutAccount;
+
+export const updatePartnerPayoutAccount = async (account: Pick<PartnerPayoutAccount, 'accountHolderName' | 'bankName' | 'branchName' | 'branchCode' | 'accountType' | 'accountNumber'>) =>
+  (await request<{payoutAccount: PartnerPayoutAccount}>('/payout-account', {
+    method: 'PUT',
+    body: JSON.stringify(account),
+  })).payoutAccount;
+
+export type PartnerPayslip = {
+  period: string;
+  runStatus: 'approved' | 'partially_paid' | 'paid';
+  paymentStatus: 'pending' | 'paid' | 'failed';
+  invoiceNumber: string;
+  paymentPurpose: string;
+  countryName: string;
+  cityName: string;
+  warehouseName: string;
+  bankAccount: Pick<PartnerPayoutAccount, 'accountHolderName' | 'bankName' | 'branchName' | 'branchCode' | 'accountType' | 'accountNumberLast4'>;
+  basicPay: number;
+  allowance: number;
+  scheduledWorkDays: number;
+  daysPresent: number;
+  paidLeaveDays: number;
+  unpaidLeaveDays: number;
+  attendanceDeduction: number;
+  attendanceNote: string;
+  incentive: number;
+  incentiveReason: string;
+  overtimeHours: number;
+  maxDailyOvertimeHoursRecorded: number;
+  maxWeeklyOvertimeHoursRecorded: number;
+  overtimePay: number;
+  festivalExpense: number;
+  ssfBasePay: number;
+  grossPay: number;
+  employeeSsf: number;
+  incomeTax: number;
+  taxableAnnualIncome: number;
+  projectedAnnualTax: number;
+  otherDeductions: number;
+  deductionCategory: string;
+  deductionReason: string;
+  employerSsf: number;
+  netPay: number;
+  transferReference: string;
+  paymentFailureReason?: string;
+  paidAt: string | null;
+};
+
+export const getPartnerPayrollHistory = async () =>
+  (await request<{payslips: PartnerPayslip[]}>('/payroll')).payslips;
+
 export type PartnerPreferences = {
   deliveryNotifications: boolean;
   paymentNotifications: boolean;

@@ -8,9 +8,7 @@ import {
   faCoins,
   faGift,
   faHandHoldingDollar,
-  faHouse,
   faList,
-  faUser,
   faTruck,
 } from '@fortawesome/free-solid-svg-icons';
 import type { IconProp } from '@fortawesome/fontawesome-svg-core';
@@ -26,8 +24,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
-import {getPartnerEarnings} from '../../../shared/services/api';
-import type {PartnerEarnings} from '../../../shared/services/api';
+import {getPartnerEarnings, getPartnerPayrollHistory} from '../../../shared/services/api';
+import type {PartnerEarnings, PartnerPayslip} from '../../../shared/services/api';
+import ProfileAvatarButton from '../../../shared/components/ProfileAvatarButton';
+import PartnerBottomNavigation from '../../../shared/components/PartnerBottomNavigation';
+import PartnerBrand from '../../../shared/components/PartnerBrand';
 import {useProfile} from '../../profile/context/ProfileContext';
 
 // ======================================================
@@ -62,14 +63,6 @@ type SummaryCardProps = {
 type TransactionRowProps = {
   transaction: Transaction;
   isLast: boolean;
-};
-
-type BottomNavItemProps = {
-  icon: IconProp;
-  label: string;
-  active: boolean;
-  notification?: boolean;
-  onPress: () => void;
 };
 
 type WeeklyBarStyle =
@@ -120,7 +113,6 @@ const getTransactionIcon = (type: TransactionType): IconProp => {
 const EarningsScreen = () => {
   const navigation = useNavigation<EarningsNavigationProp>();
   const {profile} = useProfile();
-  const initials = profile.fullName.trim().split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'DP';
 
   const [selectedPeriod, setSelectedPeriod] =
     useState<PeriodType>('Transactions');
@@ -129,6 +121,9 @@ const EarningsScreen = () => {
   const [earnings, setEarnings] = useState<PartnerEarnings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [payslips, setPayslips] = useState<PartnerPayslip[]>([]);
+  const [payrollLoading, setPayrollLoading] = useState(true);
+  const [payrollError, setPayrollError] = useState('');
 
   const apiPeriod = summaryPeriod === 'Today'
     ? 'today'
@@ -150,6 +145,17 @@ const EarningsScreen = () => {
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };
   }, [apiPeriod]);
+
+  useEffect(() => {
+    let active = true;
+    getPartnerPayrollHistory()
+      .then(rows => { if (active) setPayslips(rows); })
+      .catch(error => {
+        if (active) setPayrollError(error instanceof Error ? error.message : 'Unable to load monthly salary statements.');
+      })
+      .finally(() => { if (active) setPayrollLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   // ----------------------------------------------------
   const filteredTransactions = useMemo(() => {
@@ -217,18 +223,6 @@ const EarningsScreen = () => {
   // NAVIGATION
   // ----------------------------------------------------
 
-  const handleGoHome = () => {
-    navigation.navigate('Home');
-  };
-
-  const handleGoDeliveries = () => {
-    navigation.navigate('Deliveries');
-  };
-
-  const handleGoNotifications = () => {
-    navigation.navigate('Notifications');
-  };
-
   const handleGoProfile = () => {
     navigation.navigate('Profile');
   };
@@ -265,30 +259,16 @@ const EarningsScreen = () => {
   // ====================================================
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       {/* HEADER */}
 
       <View style={styles.header}>
-        <View style={styles.brandContainer}>
-          <View style={styles.leafIcon}>
-            <Text style={styles.leafIconText}>◢</Text>
-          </View>
-
-          <View>
-            <Text style={styles.brandText}>
-              Daily
-              <Text style={styles.brandGreen}>Mart</Text>
-            </Text>
-
-            <Text style={styles.nepalText}>Nepal</Text>
-            <Text style={styles.partnerText}>Delivery Partner</Text>
-          </View>
-        </View>
+        <PartnerBrand />
 
         <View style={styles.headerActions}>
           <Pressable
             style={styles.notificationButton}
-            onPress={handleGoNotifications}
+            onPress={() => navigation.navigate('Notifications')}
             accessibilityRole="button"
             accessibilityLabel="Open notifications"
           >
@@ -300,21 +280,18 @@ const EarningsScreen = () => {
             <View style={styles.notificationDot} />
           </Pressable>
 
-          <Pressable
-            style={styles.avatar}
+          <ProfileAvatarButton
+            imageUri={profile.profileImage?.url}
+            name={profile.fullName}
             onPress={handleGoProfile}
-            accessibilityRole="button"
-            accessibilityLabel="Open profile"
-          >
-            <Text style={styles.avatarText}>{initials}</Text>
-            <View style={styles.onlineDot} />
-          </Pressable>
+          />
         </View>
       </View>
 
       {/* SCROLLABLE CONTENT */}
 
       <ScrollView
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
@@ -411,6 +388,49 @@ const EarningsScreen = () => {
           />
         </View>
 
+        <View style={styles.payrollCard}>
+          <View style={styles.payrollHeader}>
+            <View style={styles.payrollHeading}>
+              <Text style={styles.payrollTitle}>Monthly salary</Text>
+              <Text style={styles.payrollSubtitle}>Admin-approved payslips and transfer status</Text>
+            </View>
+            <Pressable style={styles.bankButton} onPress={() => navigation.navigate('PayoutAccount')} accessibilityRole="button">
+              <Text style={styles.bankButtonText}>Bank details</Text>
+            </Pressable>
+          </View>
+          {payrollError ? <Text style={styles.payrollError}>{payrollError}</Text> : null}
+          {payrollLoading ? <Text style={styles.payrollEmpty}>Loading salary statements…</Text> : payslips.length ? payslips.map((payslip, index) => (
+            <View key={payslip.period} style={[styles.payslipRow, index < payslips.length - 1 && styles.payslipBorder]}>
+              <View style={styles.payslipHeading}>
+                <Text style={styles.payslipPeriod}>{new Date(`${payslip.period}-15T12:00:00`).toLocaleDateString('en-IN', {month: 'long', year: 'numeric'})}</Text>
+                <Text style={[styles.payslipStatus, payslip.paymentStatus === 'paid' ? styles.payslipPaid : payslip.paymentStatus === 'failed' ? styles.payslipFailed : styles.payslipPending]}>
+                  {payslip.paymentStatus === 'paid' ? 'Paid' : payslip.paymentStatus === 'failed' ? 'Transfer failed · contact admin' : 'Approved · awaiting transfer'}
+                </Text>
+              </View>
+              <Text style={styles.payslipDetail}>Payment for: {payslip.paymentPurpose}</Text>
+              {payslip.invoiceNumber ? <Text style={styles.payslipDetail}>Receipt: {payslip.invoiceNumber}</Text> : null}
+              {payslip.paidAt ? <Text style={styles.payslipDetail}>Paid on: {new Date(payslip.paidAt).toLocaleString('en-IN')}</Text> : null}
+              {payslip.bankAccount?.bankName ? <Text style={styles.payslipDetail}>Paid to: {payslip.bankAccount.accountHolderName} · {payslip.bankAccount.bankName} · •••• {payslip.bankAccount.accountNumberLast4}</Text> : null}
+              {[payslip.countryName, payslip.cityName, payslip.warehouseName].some(Boolean) ? <Text style={styles.payslipDetail}>Work location: {[payslip.countryName, payslip.cityName, payslip.warehouseName].filter(Boolean).join(' · ')}</Text> : null}
+              <View style={styles.payslipAmounts}>
+                <View><Text style={styles.payslipLabel}>Gross</Text><Text style={styles.payslipValue}>{formatNPR(payslip.grossPay)}</Text></View>
+                <View><Text style={styles.payslipLabel}>Total deductions</Text><Text style={styles.payslipValue}>{formatNPR(payslip.incomeTax + payslip.employeeSsf + payslip.otherDeductions + payslip.attendanceDeduction)}</Text></View>
+                <View style={styles.payslipNet}><Text style={styles.payslipLabel}>Net</Text><Text style={styles.payslipNetValue}>{formatNPR(payslip.netPay)}</Text></View>
+              </View>
+              <Text style={styles.payslipDetail}>Salary: Basic {formatNPR(payslip.basicPay)} · Allowance {formatNPR(payslip.allowance)} · Bonus {formatNPR(payslip.incentive)} · Festival expense {formatNPR(payslip.festivalExpense)}</Text>
+              {payslip.incentiveReason ? <Text style={styles.payslipDetail}>Bonus / incentive reason: {payslip.incentiveReason}</Text> : null}
+              <Text style={styles.payslipDetail}>Attendance: {payslip.daysPresent}/{payslip.scheduledWorkDays} days present · Paid leave {payslip.paidLeaveDays} days · Unpaid leave {payslip.unpaidLeaveDays} days · Deduction {formatNPR(payslip.attendanceDeduction)}</Text>
+              {payslip.attendanceNote ? <Text style={styles.payslipDetail}>Attendance record: {payslip.attendanceNote}</Text> : null}
+              <Text style={styles.payslipDetail}>Overtime: {payslip.overtimeHours} hours total · Max/day {payslip.maxDailyOvertimeHoursRecorded} hours · Max/week {payslip.maxWeeklyOvertimeHoursRecorded} hours · Pay {formatNPR(payslip.overtimePay)}</Text>
+              <Text style={styles.payslipDetail}>Deductions: Employee SSF {formatNPR(payslip.employeeSsf)} on base {formatNPR(payslip.ssfBasePay)} · Income tax {formatNPR(payslip.incomeTax)} · Other {formatNPR(payslip.otherDeductions)}</Text>
+              {payslip.otherDeductions > 0 ? <Text style={styles.payslipDetail}>Other deduction reason: {payslip.deductionCategory?.replace(/_/g, ' ')} · {payslip.deductionReason}</Text> : null}
+              <Text style={styles.payslipDetail}>Employer SSF contribution: {formatNPR(payslip.employerSsf)} · Estimated annual taxable income: {formatNPR(payslip.taxableAnnualIncome)} · Projected annual tax: {formatNPR(payslip.projectedAnnualTax)}</Text>
+              {payslip.transferReference ? <Text style={styles.payslipReference}>Transfer reference: {payslip.transferReference}</Text> : null}
+              {payslip.paymentFailureReason ? <Text style={styles.payrollError}>Transfer issue: {payslip.paymentFailureReason}</Text> : null}
+            </View>
+          )) : <Text style={styles.payrollEmpty}>Your approved monthly salary statements will appear here.</Text>}
+        </View>
+
         {/* TRANSACTION PERIOD TABS */}
 
         <View style={styles.tabsContainer}>
@@ -491,45 +511,7 @@ const EarningsScreen = () => {
         </View>
       </ScrollView>
 
-      {/* FIXED BOTTOM NAVIGATION */}
-
-      <View style={styles.bottomNav}>
-        <BottomNavItem
-          icon={faHouse}
-          label="Home"
-          active={false}
-          onPress={handleGoHome}
-        />
-
-        <BottomNavItem
-          icon={faTruck}
-          label="Deliveries"
-          active={false}
-          onPress={handleGoDeliveries}
-        />
-
-        <BottomNavItem
-          icon={faCoins}
-          label="Earnings"
-          active={true}
-          onPress={() => {}}
-        />
-
-        <BottomNavItem
-          icon={faList}
-          label="Notifications"
-          active={false}
-          notification
-          onPress={handleGoNotifications}
-        />
-
-        <BottomNavItem
-          icon={faUser}
-          label="Profile"
-          active={false}
-          onPress={handleGoProfile}
-        />
-      </View>
+      <PartnerBottomNavigation activeRoute="Earnings" />
     </SafeAreaView>
   );
 };
@@ -642,49 +624,6 @@ const TransactionRow = ({
 };
 
 // ======================================================
-// BOTTOM NAVIGATION ITEM
-// ======================================================
-
-const BottomNavItem = ({
-  icon,
-  label,
-  active,
-  notification,
-  onPress,
-}: BottomNavItemProps) => {
-  return (
-    <Pressable
-      style={styles.bottomNavItem}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: active }}
-    >
-      <View style={styles.bottomIconWrapper}>
-        <FontAwesomeIcon
-          icon={icon}
-          size={20}
-          color={active ? '#078A45' : '#7B8588'}
-        />
-
-        {notification && (
-          <View style={styles.bottomNotificationDot} />
-        )}
-      </View>
-
-      <Text
-        style={[
-          styles.bottomLabel,
-          active && styles.bottomLabelActive,
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-};
-
-// ======================================================
 // STYLES
 // ======================================================
 
@@ -694,6 +633,10 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+  },
+
+  scrollView: {
+    flex: 1,
   },
 
   // Header
@@ -777,34 +720,6 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     backgroundColor: '#F04444',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E4F0E8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-
-  avatarText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#07553E',
-  },
-
-  onlineDot: {
-    position: 'absolute',
-    right: -1,
-    bottom: 0,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#21B34B',
     borderWidth: 2,
     borderColor: '#FFFFFF',
   },
@@ -1229,6 +1144,46 @@ const styles = StyleSheet.create({
 
   // Earnings information
 
+  payrollCard: {
+    marginTop: 14,
+    paddingHorizontal: 14,
+    borderRadius: 15,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5ECE7',
+  },
+
+  payrollHeader: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+
+  payrollHeading: {flex: 1},
+  payrollTitle: {fontSize: 15, fontWeight: '800', color: '#26372C'},
+  payrollSubtitle: {marginTop: 4, fontSize: 10, lineHeight: 15, color: '#77827A'},
+  bankButton: {paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#EAF7EF'},
+  bankButtonText: {color: '#087B40', fontSize: 10, fontWeight: '800'},
+  payslipRow: {paddingVertical: 13},
+  payslipBorder: {borderBottomWidth: 1, borderBottomColor: '#EDF1EE'},
+  payslipHeading: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8},
+  payslipPeriod: {fontSize: 12, fontWeight: '800', color: '#26372C'},
+  payslipStatus: {fontSize: 9, fontWeight: '700'},
+  payslipDetail: {marginTop: 7, fontSize: 9, lineHeight: 14, color: '#647168'},
+  payslipPaid: {color: '#168448'},
+  payslipPending: {color: '#9A6A13'},
+  payslipFailed: {color: '#B42318'},
+  payslipAmounts: {flexDirection: 'row', justifyContent: 'space-between', gap: 5, marginTop: 11},
+  payslipNet: {alignItems: 'flex-end'},
+  payslipLabel: {fontSize: 9, color: '#7B857E'},
+  payslipValue: {marginTop: 3, fontSize: 10, fontWeight: '700', color: '#49574E'},
+  payslipNetValue: {marginTop: 3, fontSize: 11, fontWeight: '800', color: '#078A45'},
+  payslipReference: {marginTop: 8, fontSize: 9, color: '#738078'},
+  payrollEmpty: {paddingVertical: 16, color: '#758179', fontSize: 11, lineHeight: 17, textAlign: 'center'},
+  payrollError: {paddingBottom: 12, color: '#B42318', fontSize: 11},
+
   infoCard: {
     marginTop: 14,
     marginBottom: 4,
@@ -1276,56 +1231,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 
-  // Bottom navigation
-
-  bottomNav: {
-    minHeight: 70,
-    paddingHorizontal: 7,
-    paddingTop: 7,
-    paddingBottom: 5,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#ECEFEC',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-  },
-
-  bottomNavItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  bottomIconWrapper: {
-    position: 'relative',
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  bottomLabel: {
-    marginTop: 2,
-    fontSize: 9,
-    fontWeight: '600',
-    color: '#69716B',
-  },
-
-  bottomLabelActive: {
-    color: '#079741',
-    fontWeight: '800',
-  },
-
-  bottomNotificationDot: {
-    position: 'absolute',
-    top: 0,
-    right: 1,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#F44336',
-  },
 });
 
 export default EarningsScreen;

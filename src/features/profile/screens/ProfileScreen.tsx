@@ -20,6 +20,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
 
 import { useProfile } from '../context/ProfileContext';
+import PartnerBottomNavigation from '../../../shared/components/PartnerBottomNavigation';
+import PartnerBrand from '../../../shared/components/PartnerBrand';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {errorCodes, isErrorWithCode, pick, types} from '@react-native-documents/picker';
@@ -41,8 +43,6 @@ import {
   faHeadset,
   faCircleInfo,
   faRightFromBracket,
-  faHouse,
-  faTruck,
   faPen,
 } from '@fortawesome/free-solid-svg-icons';
 
@@ -65,16 +65,6 @@ type MenuItemProps = {
   title: string;
 
   subtitle: string;
-
-  onPress: () => void;
-};
-
-type BottomNavItemProps = {
-  label: 'Home' | 'Deliveries' | 'Earnings' | 'Notifications' | 'Profile';
-
-  active: boolean;
-
-  notification?: boolean;
 
   onPress: () => void;
 };
@@ -113,24 +103,16 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
 
 *  =================================================== */
 
-  const handleGoHome = () => {
-    navigation.navigate('Home');
-  };
-
-  const handleGoDeliveries = () => {
-    navigation.navigate('Deliveries');
-  };
-
-  const handleGoEarnings = () => {
-    navigation.navigate('Earnings');
-  };
-
   const handleGoNotifications = () => {
     navigation.navigate('Notifications');
   };
 
   const handleEditProfile = () => {
     navigation.navigate('EditProfile');
+  };
+
+  const handleViewPersonalInformation = () => {
+    navigation.navigate('EditProfile', {readOnly: true});
   };
 
   const handleUploadProfilePhoto = async () => {
@@ -186,6 +168,10 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
 
   const handleEarnings = () => {
     navigation.navigate('Earnings');
+  };
+
+  const handlePayoutAccount = () => {
+    navigation.navigate('PayoutAccount');
   };
 
   const handleSettings = () => {
@@ -260,22 +246,7 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
 *          ========================================= */}
 
           <View style={styles.header}>
-            <View style={styles.brandContainer}>
-              <View style={styles.brandRow}>
-               
-
-                <View>
-                  <Text style={styles.brandText}>
-                    Daily
-                    <Text style={styles.brandGreen}>Mart</Text>
-                  </Text>
-
-                  
-
-                  <Text style={styles.partnerText}>Delivery Partner</Text>
-                </View>
-              </View>
-            </View>
+            <PartnerBrand style={styles.brandContainer} />
 
             <View style={styles.headerActions}>
               {/* Notification */}
@@ -456,7 +427,7 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
               iconType="green"
               title="Personal Information"
               subtitle="Name, phone, email, address"
-              onPress={handleEditProfile}
+              onPress={handleViewPersonalInformation}
             />
 
             <MenuDivider />
@@ -485,8 +456,8 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
               icon={faBuildingColumns}
               iconType="purple"
               title="Bank & Payment Details"
-              subtitle="Contact support about payout details"
-              onPress={handleSupport}
+              subtitle="Add or update the bank account for salary payments"
+              onPress={handlePayoutAccount}
             />
 
             <MenuDivider />
@@ -560,36 +531,7 @@ const ProfileScreen = ({ onLogout }: ProfileScreenProps) => {
           <View style={styles.bottomSpacing} />
         </ScrollView>
 
-        {/* ==========================================*
-
-*            BOTTOM NAVIGATION*
-
-*        =========================================== */}
-
-        <View style={styles.bottomNavigation}>
-          <BottomNavItem label="Home" active={false} onPress={handleGoHome} />
-
-          <BottomNavItem
-            label="Deliveries"
-            active={false}
-            onPress={handleGoDeliveries}
-          />
-
-          <BottomNavItem
-            label="Earnings"
-            active={false}
-            onPress={handleGoEarnings}
-          />
-
-          <BottomNavItem
-            label="Notifications"
-            active={false}
-            notification
-            onPress={handleGoNotifications}
-          />
-
-          <BottomNavItem label="Profile" active={true} onPress={() => {}} />
-        </View>
+        <PartnerBottomNavigation activeRoute="Profile" />
       </View>
     </SafeAreaView>
   );
@@ -738,65 +680,6 @@ const MenuItem = ({
 
 const MenuDivider = () => {
   return <View style={styles.menuDivider} />;
-};
-
-/* ======================================================*
-
-*   BOTTOM NAVIGATION*
-
-*====================================================== */
-
-const BottomNavItem = ({
-  label,
-
-  active,
-
-  notification,
-
-  onPress,
-}: BottomNavItemProps) => {
-  return (
-    <Pressable
-      style={styles.bottomNavItem}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{
-        selected: active,
-      }}
-    >
-      <View style={styles.bottomIconWrapper}>
-        <BottomNavIcon label={label} active={active} />
-
-        {notification && <View style={styles.bottomNotificationDot} />}
-      </View>
-
-      <Text
-        style={[styles.bottomNavLabel, active && styles.bottomNavLabelActive]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-};
-
-const BottomNavIcon = ({
-  label,
-  active,
-}: {
-  label: BottomNavItemProps['label'];
-  active: boolean;
-}) => {
-  const color = active ? '#079447' : '#697277';
-  const icons: Record<BottomNavItemProps['label'], IconDefinition> = {
-    Home: faHouse,
-    Deliveries: faTruck,
-    Earnings: faWallet,
-    Notifications: faBell,
-    Profile: faUser,
-  };
-
-  return <FontAwesomeIcon icon={icons[label]} size={21} color={color} />;
 };
 
 /* ======================================================*
@@ -1654,90 +1537,6 @@ const styles = StyleSheet.create({
 
   bottomSpacing: {
     height: 10,
-  },
-
-  /* Bottom navigation */
-
-  bottomNavigation: {
-    height: 74,
-
-    paddingHorizontal: 4,
-
-    paddingTop: 4,
-
-    paddingBottom: 4,
-
-    backgroundColor: '#FFFFFF',
-
-    borderTopWidth: 1,
-
-    borderTopColor: '#E7EAE8',
-
-    flexDirection: 'row',
-
-    alignItems: 'center',
-
-    justifyContent: 'space-around',
-  },
-
-  bottomNavItem: {
-    flex: 1,
-
-    height: 64,
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-  },
-
-  bottomIconWrapper: {
-    width: 29,
-
-    height: 28,
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-
-    position: 'relative',
-  },
-
-  bottomNavLabel: {
-    marginTop: 4,
-
-    fontSize: 9,
-
-    lineHeight: 12,
-
-    color: '#697277',
-
-    fontWeight: '600',
-  },
-
-  bottomNavLabelActive: {
-    color: '#079447',
-
-    fontWeight: '800',
-  },
-
-  bottomNotificationDot: {
-    position: 'absolute',
-
-    top: -1,
-
-    right: 1,
-
-    width: 9,
-
-    height: 9,
-
-    borderRadius: 5,
-
-    backgroundColor: '#F04444',
-
-    borderWidth: 1.5,
-
-    borderColor: '#FFFFFF',
   },
 
   /* Home bottom icon */

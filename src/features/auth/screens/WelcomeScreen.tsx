@@ -29,6 +29,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 
 import type { AuthStackParamList } from '../../../app/navigation/AuthNavigator';
+import PartnerLogo from '../../../shared/components/PartnerLogo';
 
 type WelcomeNavigationProp = NativeStackNavigationProp<
   AuthStackParamList,
@@ -68,9 +69,9 @@ const WelcomeScreen = () => {
     logoContainerDynamic: {
       marginTop: isSmallPhone ? 16 : isCompactPhone ? 20 : 26,
     },
-    logoTextDynamic: {
-      fontSize: isSmallPhone ? 29 : 35,
-      lineHeight: isSmallPhone ? 31 : 37,
+    logoImageDynamic: {
+      width: isSmallPhone ? 150 : 170,
+      height: isSmallPhone ? 150 : 170,
     },
     roleBadgeDynamic: {
       marginTop: isSmallPhone ? 11 : isCompactPhone ? 13 : 16,
@@ -149,13 +150,11 @@ const WelcomeScreen = () => {
           <View
             style={[styles.logoContainer, dynamicStyles.logoContainerDynamic]}
           >
-            <View>
-              <Text style={[styles.logoText, dynamicStyles.logoTextDynamic]}>
-                <Text style={styles.logoDaily}>Daily</Text>
-
-                <Text style={styles.logoMart}>Mart</Text>
-              </Text>
-            </View>
+            <PartnerLogo
+              width={isSmallPhone ? 150 : 170}
+              height={isSmallPhone ? 150 : 170}
+              style={dynamicStyles.logoImageDynamic}
+            />
           </View>
 
           {/* Delivery Partner badge */}
@@ -364,40 +363,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
 
     justifyContent: 'center',
-  },
-
-  logoLeaf: {
-    width: 42,
-
-    height: 48,
-
-    alignItems: 'center',
-
-    justifyContent: 'center',
-
-    marginRight: 2,
-  },
-
-  logoText: {
-    fontWeight: '800',
-
-    letterSpacing: -1,
-  },
-
-  logoDaily: {
-    color: '#07553E',
-  },
-
-  logoMart: {
-    color: '#20B94E',
-  },
-
-  logoNepal: {
-    textAlign: 'right',
-
-    fontWeight: '600',
-
-    color: '#07553E',
   },
 
   roleBadge: {

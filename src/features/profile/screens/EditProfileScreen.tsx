@@ -10,7 +10,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import {useNavigation} from '@react-navigation/native';
+import {useNavigation, useRoute} from '@react-navigation/native';
+import type {RouteProp} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
@@ -20,6 +21,7 @@ type EditProfileNavigationProp = NativeStackNavigationProp<
   MainStackParamList,
   'EditProfile'
 >;
+type EditProfileRouteProp = RouteProp<MainStackParamList, 'EditProfile'>;
 
 const normalizeNepalPhone = (value: string) =>
   value.replace(/[\s()-]/g, '').replace(/^(?:\+977|977)/, '');
@@ -50,6 +52,8 @@ const isValidDateOfBirth = (value: string) => {
 
 const EditProfileScreen = () => {
   const navigation = useNavigation<EditProfileNavigationProp>();
+  const route = useRoute<EditProfileRouteProp>();
+  const isReadOnly = route.params?.readOnly === true;
   const {profile, updateProfile} = useProfile();
 
   const [fullName, setFullName] = useState(profile.fullName);
@@ -233,7 +237,7 @@ const EditProfileScreen = () => {
             <Text style={styles.backArrow}>‹</Text>
           </Pressable>
 
-          <Text style={styles.headerTitle}>Edit Profile</Text>
+          <Text style={styles.headerTitle}>{isReadOnly ? 'Personal Information' : 'Edit Profile'}</Text>
 
           <View style={styles.headerSpacer} />
         </View>
@@ -246,52 +250,66 @@ const EditProfileScreen = () => {
             <Text style={styles.sectionTitle}>Personal Information</Text>
 
             <View style={styles.card}>
-              <InputField
-                label="Full Name"
-                value={fullName}
-                onChangeText={setFullName}
-                placeholder="Enter full name"
-                maxLength={100}
-              />
+              {isReadOnly ? (
+                <ReadOnlyField label="Full Name" value={profile.fullName || 'Not provided'} />
+              ) : (
+                <InputField
+                  label="Full Name"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  placeholder="Enter full name"
+                  maxLength={100}
+                />
+              )}
 
               <FieldDivider />
 
-              <InputField
-                label="Email Address"
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Enter email address"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={254}
-              />
+              {isReadOnly ? (
+                <ReadOnlyField label="Email Address" value={profile.email || 'Not provided'} />
+              ) : (
+                <InputField
+                  label="Email Address"
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Enter email address"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={254}
+                />
+              )}
 
               <FieldDivider />
 
-              <InputField
-                label="Date of Birth"
-                value={dateOfBirth}
-                onChangeText={setDateOfBirth}
-                placeholder="DD/MM/YYYY"
-                keyboardType="numbers-and-punctuation"
-                maxLength={10}
-              />
+              {isReadOnly ? (
+                <ReadOnlyField label="Date of Birth" value={profile.dateOfBirth || 'Not provided'} />
+              ) : (
+                <InputField
+                  label="Date of Birth"
+                  value={dateOfBirth}
+                  onChangeText={setDateOfBirth}
+                  placeholder="DD/MM/YYYY"
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={10}
+                />
+              )}
 
-              <Text style={styles.fieldHint}>
-                Use DD/MM/YYYY format.
-              </Text>
+              {!isReadOnly ? <Text style={styles.fieldHint}>Use DD/MM/YYYY format.</Text> : null}
 
               <FieldDivider />
 
-              <InputField
-                label="Address"
-                value={address}
-                onChangeText={setAddress}
-                placeholder="Enter your full address"
-                multiline
-                maxLength={250}
-              />
+              {isReadOnly ? (
+                <ReadOnlyField label="Address" value={profile.address || 'Not provided'} />
+              ) : (
+                <InputField
+                  label="Address"
+                  value={address}
+                  onChangeText={setAddress}
+                  placeholder="Enter your full address"
+                  multiline
+                  maxLength={250}
+                />
+              )}
             </View>
           </View>
 
@@ -329,57 +347,71 @@ const EditProfileScreen = () => {
             <Text style={styles.sectionTitle}>Emergency Contact</Text>
 
             <View style={styles.card}>
-              <InputField
-                label="Contact Name"
-                value={emergencyContactName}
-                onChangeText={setEmergencyContactName}
-                placeholder="Enter emergency contact name"
-                maxLength={100}
-              />
+              {isReadOnly ? (
+                <ReadOnlyField label="Contact Name" value={profile.emergencyContactName || 'Not provided'} />
+              ) : (
+                <InputField
+                  label="Contact Name"
+                  value={emergencyContactName}
+                  onChangeText={setEmergencyContactName}
+                  placeholder="Enter emergency contact name"
+                  maxLength={100}
+                />
+              )}
 
               <FieldDivider />
 
-              <InputField
-                label="Contact Number"
-                value={emergencyContactNumber}
-                onChangeText={setEmergencyContactNumber}
-                placeholder="Enter Nepal mobile number"
-                keyboardType="phone-pad"
-                maxLength={16}
-              />
+              {isReadOnly ? (
+                <ReadOnlyField label="Contact Number" value={profile.emergencyContactNumber || 'Not provided'} />
+              ) : (
+                <InputField
+                  label="Contact Number"
+                  value={emergencyContactNumber}
+                  onChangeText={setEmergencyContactNumber}
+                  placeholder="Enter Nepal mobile number"
+                  keyboardType="phone-pad"
+                  maxLength={16}
+                />
+              )}
             </View>
 
-            <Text style={styles.helperText}>
-              Both emergency contact fields must be filled in together, or
-              both can be left empty.
-            </Text>
+            {!isReadOnly ? (
+              <Text style={styles.helperText}>
+                Both emergency contact fields must be filled in together, or
+                both can be left empty.
+              </Text>
+            ) : null}
           </View>
 
-          <View style={styles.noticeCard}>
-            <View style={styles.noticeIcon}>
-              <Text style={styles.noticeIconText}>i</Text>
+          {!isReadOnly ? (
+            <View style={styles.noticeCard}>
+              <View style={styles.noticeIcon}>
+                <Text style={styles.noticeIconText}>i</Text>
+              </View>
+
+              <View style={styles.noticeContent}>
+                <Text style={styles.noticeTitle}>
+                  Verification may be required
+                </Text>
+
+                <Text style={styles.noticeText}>
+                  Some profile changes may require review or approval before
+                  they become active in the production system.
+                </Text>
+              </View>
             </View>
+          ) : null}
 
-            <View style={styles.noticeContent}>
-              <Text style={styles.noticeTitle}>
-                Verification may be required
-              </Text>
-
-              <Text style={styles.noticeText}>
-                Some profile changes may require review or approval before
-                they become active in the production system.
-              </Text>
-            </View>
-          </View>
-
-          <Pressable
-            style={styles.saveButton}
-            onPress={handleSaveChanges}
-            disabled={isSaving}
-            accessibilityRole="button"
-            accessibilityLabel="Save profile changes">
-            <Text style={styles.saveButtonText}>{isSaving ? 'Saving…' : 'Save Changes'}</Text>
-          </Pressable>
+          {!isReadOnly ? (
+            <Pressable
+              style={styles.saveButton}
+              onPress={handleSaveChanges}
+              disabled={isSaving}
+              accessibilityRole="button"
+              accessibilityLabel="Save profile changes">
+              <Text style={styles.saveButtonText}>{isSaving ? 'Saving…' : 'Save Changes'}</Text>
+            </Pressable>
+          ) : null}
 
           <View style={styles.bottomSpacing} />
         </ScrollView>
