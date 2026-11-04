@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {AuthorizationStatus} from 'react-native-notify-kit';
 
 import {useNavigation} from '@react-navigation/native';
 
@@ -23,6 +24,13 @@ import {
   updatePartnerPreferences,
 } from '../../../shared/services/api';
 import type {PartnerPreferences} from '../../../shared/services/api';
+import {
+  getDeviceNotificationSettings,
+  hasDeviceNotificationPermission,
+  openDeviceNotificationSettings,
+  requestPartnerNotificationPermission,
+  syncPartnerPushToken,
+} from '../../notifications/services/pushNotifications';
 
 type SettingsNavigationProp = NativeStackNavigationProp<
   MainStackParamList,
@@ -34,6 +42,7 @@ const SettingsScreen = () => {
   const [preferences, setPreferences] = useState<PartnerPreferences | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isEnablingDeviceNotifications, setIsEnablingDeviceNotifications] = useState(false);
   const [preferenceError, setPreferenceError] = useState('');
   const loadPreferences = useCallback(async () => {
     setIsLoaded(false);
@@ -75,6 +84,54 @@ const SettingsScreen = () => {
 
   const handleSecurity = () => {
     navigation.navigate('Security');
+  };
+
+  const handleDeviceNotifications = async () => {
+    if (isEnablingDeviceNotifications) return;
+    setIsEnablingDeviceNotifications(true);
+    try {
+      const settings = await getDeviceNotificationSettings();
+      if (hasDeviceNotificationPermission(settings.authorizationStatus)) {
+        await syncPartnerPushToken();
+        Alert.alert('Device alerts are enabled', 'Essential delivery alerts can appear on this device.');
+        return;
+      }
+      if (settings.authorizationStatus === AuthorizationStatus.DENIED) {
+        Alert.alert(
+          'Allow device notifications',
+          'Notifications are turned off for DailyMart in your device settings.',
+          [
+            {text: 'Cancel', style: 'cancel'},
+            {text: 'Open settings', onPress: () => {
+              openDeviceNotificationSettings().catch(error => Alert.alert('Could not open settings', error.message));
+            }},
+          ],
+        );
+        return;
+      }
+      const enabled = await requestPartnerNotificationPermission();
+      if (enabled) {
+        Alert.alert('Device alerts are enabled', 'Essential delivery alerts can appear on this device.');
+      } else {
+        Alert.alert(
+          'Notifications are still off',
+          'Allow notifications in your device settings to receive essential delivery alerts.',
+          [
+            {text: 'Later', style: 'cancel'},
+            {text: 'Open settings', onPress: () => {
+              openDeviceNotificationSettings().catch(error => Alert.alert('Could not open settings', error.message));
+            }},
+          ],
+        );
+      }
+    } catch (error) {
+      Alert.alert(
+        'Could not enable device alerts',
+        error instanceof Error ? error.message : 'Check your connection and try again.',
+      );
+    } finally {
+      setIsEnablingDeviceNotifications(false);
+    }
   };
 
   return (
@@ -155,6 +212,29 @@ const SettingsScreen = () => {
           <Text style={styles.sectionTitle}>Notifications</Text>
 
           <View style={styles.card}>
+            <Pressable
+              style={styles.settingRow}
+              onPress={handleDeviceNotifications}
+              accessibilityRole="button"
+              accessibilityLabel="Enable or manage device notifications">
+              <View style={styles.settingIcon}>
+                <Text style={styles.settingIconText}>♢</Text>
+              </View>
+
+              <View style={styles.settingContent}>
+                <Text style={styles.settingTitle}>Device Alerts</Text>
+                <Text style={styles.settingDescription}>
+                  {isEnablingDeviceNotifications
+                    ? 'Checking notification permission…'
+                    : 'Allow essential alerts to appear outside the app.'}
+                </Text>
+              </View>
+
+              <Text style={styles.linkText}>Manage</Text>
+            </Pressable>
+
+            <Divider />
+
             <SettingSwitchRow
               title="Delivery Notifications"
               description="Save your preference for new delivery and assignment alerts."

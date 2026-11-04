@@ -4,6 +4,7 @@ import {API_ORIGIN} from '../config/apiOrigin';
 
 const TOKEN_KEY = 'dailymart.deliveryPartnerToken';
 const TOKEN_EXPIRY_KEY = 'dailymart.deliveryPartnerTokenExpiresAt';
+const PUSH_TOKEN_KEY = 'dailymart.deliveryPartnerPushToken';
 const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 const configuredBaseUrl = (
   globalThis as typeof globalThis & {__DAILYMART_API_BASE_URL__?: string}
@@ -187,7 +188,7 @@ export async function restorePartnerSession() {
     return result.partner;
   } catch (error) {
     if (error instanceof ApiRequestError && [401, 403].includes(error.status)) {
-      await AsyncStorage.removeItem(TOKEN_KEY);
+      await logoutPartner();
       return null;
     }
     throw error;
@@ -195,7 +196,44 @@ export async function restorePartnerSession() {
 }
 
 export async function logoutPartner() {
+  try {
+    await unregisterPartnerPushToken();
+  } catch {
+    // Always clear the local account session even if the device is offline.
+  }
   await AsyncStorage.multiRemove([TOKEN_KEY, TOKEN_EXPIRY_KEY]);
+}
+
+export async function registerPartnerPushToken(token: string, platform: 'android' | 'ios') {
+  const previousToken = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+  if (previousToken && previousToken !== token) {
+    try {
+      await request('/push-tokens', {
+        method: 'DELETE',
+        body: JSON.stringify({token: previousToken}),
+      });
+    } catch {
+      // Register the current token even if the old token cannot be removed.
+    }
+  }
+  await request('/push-tokens', {
+    method: 'POST',
+    body: JSON.stringify({token, platform}),
+  });
+  await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+}
+
+export async function unregisterPartnerPushToken() {
+  const token = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+  if (!token) return;
+  try {
+    await request('/push-tokens', {
+      method: 'DELETE',
+      body: JSON.stringify({token}),
+    });
+  } finally {
+    await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
+  }
 }
 
 export async function getPartnerSessionExpiresAt() {
@@ -206,11 +244,12 @@ export async function getPartnerSessionExpiresAt() {
 export type PartnerNotification = {
   _id: string;
   type?: string;
+  source?: string;
   title: string;
   message: string;
   createdAt: string;
   isRead: boolean;
-  data?: {orderId?: string; orderNumber?: string};
+  data?: {orderId?: string; orderNumber?: string; supportRequestId?: string; reference?: string};
 };
 
 export const getPartnerNotifications = async () =>
@@ -298,6 +337,7 @@ export type PartnerSupportTicket = {
   status: 'Open' | 'In Progress' | 'Waiting for Customer' | 'Resolved' | 'Closed';
   description: string;
   order?: {id: string | null; reference: string; status?: string} | null;
+  emergencyLocation?: {latitude: number; longitude: number; capturedAt?: string} | null;
   resolution: string;
   messages: Array<{id: string; authorType: string; authorName: string; body: string; createdAt: string}>;
   createdAt: string;
@@ -325,6 +365,9 @@ const supportRequest = async <T>(path: string, options: RequestInit = {}): Promi
 
 export const getPartnerSupportTickets = async () =>
   (await supportRequest<{supportRequests: PartnerSupportTicket[]}>('', {method: 'GET'})).supportRequests;
+
+export const getPartnerSupportTicket = async (ticketId: string) =>
+  (await supportRequest<{supportRequest: PartnerSupportTicket}>(`/${encodeURIComponent(ticketId)}`, {method: 'GET'})).supportRequest;
 
 export const createPartnerSupportTicket = async (input: {
   category: string;

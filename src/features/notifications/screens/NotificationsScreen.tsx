@@ -52,6 +52,7 @@ type NotificationItem = {
   read: boolean;
 
   deliveryId?: string;
+  supportTicketId?: string;
 
   group: NotificationGroup;
 };
@@ -66,11 +67,12 @@ type NotificationsNavigationProp = NativeStackNavigationProp<
 const mapPartnerNotification = (record: {
   _id: string;
   type?: string;
+  source?: string;
   title: string;
   message: string;
   createdAt: string;
   isRead: boolean;
-  data?: {orderNumber?: string; orderId?: string};
+  data?: {orderNumber?: string; orderId?: string; supportRequestId?: string};
 }): NotificationItem => {
   const createdAt = new Date(record.createdAt);
   const today = new Date();
@@ -99,7 +101,8 @@ const mapPartnerNotification = (record: {
         : rawType.includes('delivery') || rawType.includes('order')
           ? 'DELIVERY'
           : 'SYSTEM';
-  const category: NotificationCategory | undefined = rawType.includes('support')
+  const supportTicketId = record.data?.supportRequestId;
+  const category: NotificationCategory | undefined = record.source === 'support' || supportTicketId
     ? 'SUPPORT'
     : undefined;
   return {
@@ -111,6 +114,7 @@ const mapPartnerNotification = (record: {
     time: createdAt.toLocaleString(),
     read: Boolean(record.isRead),
     deliveryId: record.data?.orderNumber || record.data?.orderId,
+    supportTicketId,
     group,
   };
 };
@@ -329,7 +333,7 @@ const FilterPill = ({
         icon={icon}
         size={12}
         color={active ? '#FFFFFF' : '#168648'}
-        style={{ marginRight: 5 }}
+        style={styles.filterIcon}
       />
     )}
     <Text style={[styles.filterText, active && styles.filterTextActive]}>
@@ -420,6 +424,7 @@ const NotificationsScreen = () => {
       time: notification.time,
       type: notification.type,
       deliveryId: notification.deliveryId,
+      supportTicketId: notification.supportTicketId,
       read,
     });
   };

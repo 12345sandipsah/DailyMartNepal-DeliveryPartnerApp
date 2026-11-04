@@ -1,8 +1,9 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
   Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -10,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import {useNavigation} from '@react-navigation/native';
+import {useFocusEffect, useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
 import {
@@ -28,6 +29,7 @@ const SecurityScreen = ({onLogout}: SecurityScreenProps) => {
   const navigation = useNavigation<SecurityNavigationProp>();
   const [activities, setActivities] = useState<PartnerLoginActivity[]>([]);
   const [isLoadingActivity, setIsLoadingActivity] = useState(true);
+  const [isRefreshingActivity, setIsRefreshingActivity] = useState(false);
   const [activityError, setActivityError] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -35,29 +37,44 @@ const SecurityScreen = ({onLogout}: SecurityScreenProps) => {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isRevokingSessions, setIsRevokingSessions] = useState(false);
 
-  const loadActivity = useCallback(async () => {
-    setIsLoadingActivity(true);
+  const loadActivity = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoadingActivity(true);
     setActivityError('');
     try {
       setActivities(await getPartnerLoginActivity());
     } catch (error) {
       setActivityError(error instanceof Error ? error.message : 'Unable to load account activity.');
     } finally {
-      setIsLoadingActivity(false);
+      if (showLoading) setIsLoadingActivity(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadActivity();
+  useFocusEffect(
+    useCallback(() => {
+      void loadActivity();
+    }, [loadActivity]),
+  );
+
+  const refreshActivity = useCallback(async () => {
+    setIsRefreshingActivity(true);
+    try {
+      await loadActivity(false);
+    } finally {
+      setIsRefreshingActivity(false);
+    }
   }, [loadActivity]);
 
   const handleChangePassword = async () => {
-    if (!currentPassword || !newPassword) {
-      Alert.alert('Password required', 'Enter your current password and a new password.');
+    if (!currentPassword) {
+      Alert.alert('Password required', 'Enter your current password.');
       return;
     }
-    if (newPassword.length < 10) {
-      Alert.alert('Password too short', 'Use at least 10 characters for your new password.');
+    if (!newPassword) {
+      Alert.alert('Password required', 'Enter a new password.');
+      return;
+    }
+    if (newPassword.length < 10 || newPassword.length > 128) {
+      Alert.alert('Password length', 'Use a new password between 10 and 128 characters.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -115,7 +132,17 @@ const SecurityScreen = ({onLogout}: SecurityScreenProps) => {
           <View style={styles.headerSpacer} />
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshingActivity}
+              onRefresh={refreshActivity}
+              tintColor="#168447"
+              colors={["#168447"]}
+            />
+          }>
           <View style={styles.statusCard}>
             <Text style={styles.statusIcon}>✓</Text>
             <View style={styles.flex}>
@@ -127,12 +154,12 @@ const SecurityScreen = ({onLogout}: SecurityScreenProps) => {
           <Text style={styles.sectionTitle}>Change password</Text>
           <View style={styles.card}>
             <Text style={styles.fieldLabel}>Current password</Text>
-            <TextInput value={currentPassword} onChangeText={setCurrentPassword} secureTextEntry autoCapitalize="none" style={styles.input} placeholder="Enter current password" />
+            <TextInput value={currentPassword} onChangeText={setCurrentPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} maxLength={128} textContentType="password" style={styles.input} placeholder="Enter current password" />
             <Text style={styles.fieldLabel}>New password</Text>
-            <TextInput value={newPassword} onChangeText={setNewPassword} secureTextEntry autoCapitalize="none" style={styles.input} placeholder="At least 10 characters" />
+            <TextInput value={newPassword} onChangeText={setNewPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} maxLength={128} textContentType="newPassword" style={styles.input} placeholder="10 to 128 characters" />
             <Text style={styles.fieldLabel}>Confirm new password</Text>
-            <TextInput value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry autoCapitalize="none" style={styles.input} placeholder="Re-enter new password" />
-            <Pressable style={[styles.primaryButton, isChangingPassword && styles.disabledButton]} disabled={isChangingPassword} onPress={() => { handleChangePassword(); }} accessibilityRole="button">
+            <TextInput value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} maxLength={128} textContentType="newPassword" style={styles.input} placeholder="Re-enter new password" />
+            <Pressable style={[styles.primaryButton, isChangingPassword && styles.disabledButton]} disabled={isChangingPassword} onPress={handleChangePassword} accessibilityRole="button">
               {isChangingPassword ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Change password</Text>}
             </Pressable>
             <Text style={styles.helperText}>Changing your password ends existing sessions. You will need to sign in again.</Text>

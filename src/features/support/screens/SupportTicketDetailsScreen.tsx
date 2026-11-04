@@ -1,9 +1,10 @@
-import React, {useState} from 'react';
+import React, {useCallback, useState} from 'react';
 
 import {
   ActivityIndicator,
   Alert,
   Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -12,9 +13,11 @@ import {
   View,
 } from 'react-native';
 
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 
 import type { RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { MainStackParamList } from '../../../app/navigation/MainNavigator';
 
 import { useSupportTickets } from '../context/SupportTicketContext';
 
@@ -40,6 +43,7 @@ type TicketDetailsRouteProp = RouteProp<
   TicketDetailsParams,
   'SupportTicketDetails'
 >;
+type TicketDetailsNavigationProp = NativeStackNavigationProp<MainStackParamList, 'SupportTicketDetails'>;
 
 const getStatusStyles = (status: TicketStatus) => {
   switch (status) {
@@ -51,6 +55,7 @@ const getStatusStyles = (status: TicketStatus) => {
       };
 
     case 'IN PROGRESS':
+    case 'WAITING FOR CUSTOMER':
       return {
         badge: styles.statusBadgeProgress,
 
@@ -58,6 +63,7 @@ const getStatusStyles = (status: TicketStatus) => {
       };
 
     case 'RESOLVED':
+    case 'CLOSED':
       return {
         badge: styles.statusBadgeResolved,
 
@@ -99,16 +105,46 @@ const getPriorityStyles = (priority: TicketPriority) => {
 };
 
 const SupportTicketDetailsScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<TicketDetailsNavigationProp>();
 
   const route = useRoute<TicketDetailsRouteProp>();
 
-  const { getTicketById, replyToTicket } = useSupportTickets();
+  const { getTicketById, refreshTicket, replyToTicket } = useSupportTickets();
 
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
+  const [isLoadingTicket, setIsLoadingTicket] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const ticket = getTicketById(route.params.ticketId);
+
+  const loadTicket = useCallback(async () => {
+    setLoadError('');
+    setIsLoadingTicket(true);
+    try {
+      await refreshTicket(route.params.ticketId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to load this support ticket.');
+    } finally {
+      setIsLoadingTicket(false);
+    }
+  }, [refreshTicket, route.params.ticketId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadTicket();
+    }, [loadTicket]),
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await loadTicket();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [loadTicket]);
 
   if (!ticket) {
     return (
@@ -130,31 +166,40 @@ const SupportTicketDetailsScreen = () => {
           </View>
 
           <View style={styles.notFoundContainer}>
-            <View style={styles.notFoundIconContainer}>
-              <FontAwesomeIcon
-                icon={faCircleExclamation}
-                size={28}
-                color="#C62828"
-              />
-            </View>
-
-            <Text style={styles.notFoundTitle}>Ticket Not Found</Text>
-
-            <Text style={styles.notFoundText}>
-              The support ticket could not be found. It may no longer be
-              available in the current session.
-            </Text>
-
-            <Pressable
-              style={styles.backToTicketsButton}
-              onPress={() => navigation.goBack()}
-              accessibilityRole="button"
-              accessibilityLabel="Go back to support tickets"
-            >
-              <Text style={styles.backToTicketsButtonText}>
-                Back to Tickets
-              </Text>
-            </Pressable>
+            {isLoadingTicket ? (
+              <>
+                <ActivityIndicator size="large" color="#168447" />
+                <Text style={styles.notFoundTitle}>Loading ticket…</Text>
+              </>
+            ) : (
+              <>
+                <View style={styles.notFoundIconContainer}>
+                  <FontAwesomeIcon
+                    icon={faCircleExclamation}
+                    size={28}
+                    color="#C62828"
+                  />
+                </View>
+                <Text style={styles.notFoundTitle}>Ticket unavailable</Text>
+                <Text style={styles.notFoundText}>
+                  {loadError || 'This support ticket could not be found.'}
+                </Text>
+                <Pressable
+                  style={styles.backToTicketsButton}
+                  onPress={() => { loadTicket(); }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry loading support ticket">
+                  <Text style={styles.backToTicketsButtonText}>Retry</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.backToTicketsButton}
+                  onPress={() => navigation.navigate('SupportTickets')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back to support tickets">
+                  <Text style={styles.backToTicketsButtonText}>Back to Tickets</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
       </SafeAreaView>
@@ -203,7 +248,23 @@ const SupportTicketDetailsScreen = () => {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor="#168447"
+              colors={["#168447"]}
+            />
+          }
         >
+          {loadError ? (
+            <View style={styles.refreshError}>
+              <Text style={styles.refreshErrorText}>{loadError}</Text>
+              <Pressable onPress={() => { loadTicket(); }} accessibilityRole="button">
+                <Text style={styles.refreshRetry}>Retry</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <View style={styles.ticketHeaderCard}>
             <View style={styles.ticketHeaderTopRow}>
               <View style={styles.ticketIdContainer}>
@@ -314,7 +375,9 @@ const SupportTicketDetailsScreen = () => {
                 <Text style={styles.timelineText}>
                   {ticket.status === 'OPEN'
                     ? 'Your ticket is waiting for the support team to review it.'
-                    : 'The DailyMart Nepal support team is reviewing your request.'}
+                    : ticket.status === 'WAITING FOR CUSTOMER'
+                      ? 'The support team replied and is waiting for your response.'
+                      : 'The DailyMart Nepal support team is reviewing your request.'}
                 </Text>
 
                 <Text style={styles.timelineTime}>
@@ -336,17 +399,23 @@ const SupportTicketDetailsScreen = () => {
 
               <View style={styles.timelineContent}>
                 <Text style={styles.timelineTitle}>
-                  {ticket.status === 'RESOLVED' ? 'Resolved' : 'Resolution'}
+                  {ticket.status === 'RESOLVED'
+                    ? 'Resolved'
+                    : ticket.status === 'CLOSED'
+                      ? 'Closed'
+                      : 'Resolution'}
                 </Text>
 
                 <Text style={styles.timelineText}>
                   {ticket.status === 'RESOLVED'
                     ? 'The support request has been resolved.'
-                    : 'The support team will provide a resolution after the review is complete.'}
+                    : ticket.status === 'CLOSED'
+                      ? 'This support request is closed. Reply below if you need the support team to reopen it.'
+                      : 'The support team will provide a resolution after the review is complete.'}
                 </Text>
 
                 <Text style={styles.timelineTime}>
-                  {ticket.status === 'RESOLVED' ? ticket.updatedAt : 'Pending'}
+                  {ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ticket.updatedAt : 'Pending'}
                 </Text>
               </View>
             </View>
@@ -984,6 +1053,27 @@ const styles = StyleSheet.create({
     lineHeight: 17,
 
     color: '#6B7280',
+  },
+
+  refreshError: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFF7F6',
+    borderWidth: 1,
+    borderColor: '#F0B4AE',
+    gap: 6,
+  },
+
+  refreshErrorText: {
+    fontSize: 12,
+    color: '#B42318',
+  },
+
+  refreshRetry: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#168447',
   },
 
   notFoundContainer: {

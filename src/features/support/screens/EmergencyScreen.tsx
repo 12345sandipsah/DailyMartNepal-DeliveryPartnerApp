@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useRef, useState} from 'react';
 
 import {
   Alert,
@@ -57,6 +57,7 @@ const EmergencyScreen = () => {
 
   const [submitting, setSubmitting] =
     useState(false);
+  const submissionLockRef = useRef(false);
 
   const handleActivateEmergency = () => {
     Alert.alert(
@@ -71,6 +72,8 @@ const EmergencyScreen = () => {
           text: 'Activate SOS',
           style: 'destructive',
           onPress: async () => {
+            if (submissionLockRef.current) return;
+            submissionLockRef.current = true;
             setSubmitting(true);
             try {
               const ticket = await addTicket({
@@ -97,6 +100,7 @@ const EmergencyScreen = () => {
                   : 'Check your connection and try again.',
               );
             } finally {
+              submissionLockRef.current = false;
               setSubmitting(false);
             }
           },
@@ -161,6 +165,15 @@ const EmergencyScreen = () => {
                   <Text style={styles.activeDetailValue}>{activeTicket.id}</Text>
                 </View>
               )}
+
+              <View style={styles.activeDetailRow}>
+                <Text style={styles.activeDetailLabel}>Last saved location</Text>
+                <Text style={styles.activeDetailValue}>
+                  {activeTicket?.emergencyLocation
+                    ? `${activeTicket.emergencyLocation.latitude.toFixed(5)}, ${activeTicket.emergencyLocation.longitude.toFixed(5)}${activeTicket.emergencyLocation.capturedAt ? ` · ${new Date(activeTicket.emergencyLocation.capturedAt).toLocaleTimeString()}` : ''}`
+                    : 'Unavailable; share a nearby landmark with support'}
+                </Text>
+              </View>
 
               <View style={styles.activeDivider} />
 
@@ -281,6 +294,9 @@ const EmergencyScreen = () => {
               Normal delivery problems should be reported through
               a support ticket. Use this screen only when an
               immediate emergency requires special assistance.
+            </Text>
+            <Text style={styles.warningText}>
+              The last location saved during navigation is attached when available. Add a nearby landmark below if it is missing.
             </Text>
           </View>
 

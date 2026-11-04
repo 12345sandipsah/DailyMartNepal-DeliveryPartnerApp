@@ -49,9 +49,9 @@ const CATEGORIES: TicketCategory[] = [
 ];
 
 const PRIORITIES: TicketPriority[] = [
+  'LOW',
   'NORMAL',
   'HIGH',
-  'URGENT',
 ];
 
 const CreateSupportTicketScreen = () => {
@@ -317,6 +317,10 @@ const CreateSupportTicketScreen = () => {
                 ))}
               </View>
             )}
+
+            <Text style={styles.helperText}>
+              Urgent priority is reserved for Emergency / SOS requests.
+            </Text>
           </View>
 
           <View style={styles.formSection}>

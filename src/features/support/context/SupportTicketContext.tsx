@@ -1,7 +1,8 @@
-import React, {createContext, useCallback, useContext, useEffect, useMemo, useState} from 'react';
+import React, {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
 import {
   createPartnerSupportTicket,
+  getPartnerSupportTicket,
   getPartnerSupportTickets,
   replyToPartnerSupportTicket,
 } from '../../../shared/services/api';
@@ -11,7 +12,7 @@ export type TicketStatus = 'OPEN' | 'IN PROGRESS' | 'WAITING FOR CUSTOMER' | 'RE
 export type TicketPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
 export type TicketCategory =
   | 'Delivery' | 'Payment' | 'Customer' | 'Vehicle' | 'Warehouse' | 'Account' | 'Other'
-  | 'Orders' | 'Payments' | 'Refunds' | 'Product Quality' | 'Missing or Incorrect Items'
+  | 'Orders' | 'Payments' | 'Customers' | 'Refunds' | 'Product Quality' | 'Missing or Incorrect Items'
   | 'Cancellation' | 'Offers & Coupons' | 'App & Technical' | 'Safety / Emergency' | 'Feedback';
 
 export type SupportTicketMessage = {
@@ -31,6 +32,7 @@ export type SupportTicket = {
   status: TicketStatus;
   description: string;
   orderReference?: string;
+  emergencyLocation?: {latitude: number; longitude: number; capturedAt?: string} | null;
   createdAt: string;
   updatedAt: string;
   latestResponse: string;
@@ -51,6 +53,7 @@ type SupportTicketContextValue = {
   tickets: SupportTicket[];
   isLoaded: boolean;
   refreshTickets: () => Promise<void>;
+  refreshTicket: (ticketId: string) => Promise<SupportTicket>;
   addTicket: (input: CreateSupportTicketInput) => Promise<SupportTicket>;
   replyToTicket: (ticketId: string, message: string) => Promise<SupportTicket>;
   getTicketById: (ticketId: string) => SupportTicket | undefined;
@@ -81,6 +84,7 @@ const toTicket = (ticket: PartnerSupportTicket): SupportTicket => {
     status: normalizeStatus(ticket.status),
     description: ticket.description,
     orderReference: ticket.order?.reference || undefined,
+    emergencyLocation: ticket.emergencyLocation || null,
     createdAt: dateLabel(ticket.createdAt),
     updatedAt: dateLabel(ticket.updatedAt),
     latestResponse: latest?.body || ticket.resolution || ticket.description,
@@ -102,20 +106,33 @@ type SupportTicketProviderProps = {children: ReactNode};
 export const SupportTicketProvider = ({children}: SupportTicketProviderProps) => {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const ticketListRequestRef = useRef(0);
 
   const refreshTickets = useCallback(async () => {
+    const requestId = ++ticketListRequestRef.current;
     try {
       const records = await getPartnerSupportTickets();
-      setTickets(records.map(toTicket));
+      if (requestId === ticketListRequestRef.current) setTickets(records.map(toTicket));
     } finally {
       setIsLoaded(true);
     }
   }, []);
 
+  const refreshTicket = useCallback(async (ticketId: string): Promise<SupportTicket> => {
+    const record = await getPartnerSupportTicket(ticketId);
+    const updated = toTicket(record);
+    ticketListRequestRef.current += 1;
+    setTickets(current => [updated, ...current.filter(ticket => ticket.id !== updated.id)]);
+    return updated;
+  }, []);
+
   useEffect(() => {
     let active = true;
+    const requestId = ++ticketListRequestRef.current;
     getPartnerSupportTickets()
-      .then(records => { if (active) setTickets(records.map(toTicket)); })
+      .then(records => {
+        if (active && requestId === ticketListRequestRef.current) setTickets(records.map(toTicket));
+      })
       .catch(error => { console.warn('Support ticket load failed:', error); })
       .finally(() => { if (active) setIsLoaded(true); });
     return () => { active = false; };
@@ -135,6 +152,7 @@ export const SupportTicketProvider = ({children}: SupportTicketProviderProps) =>
       isEmergency: input.isEmergency,
     });
     const next = toTicket(created);
+    ticketListRequestRef.current += 1;
     setTickets(current => [next, ...current.filter(ticket => ticket.id !== next.id)]);
     return next;
   }, []);
@@ -142,6 +160,7 @@ export const SupportTicketProvider = ({children}: SupportTicketProviderProps) =>
   const replyToTicket = useCallback(async (ticketId: string, message: string): Promise<SupportTicket> => {
     const created = await replyToPartnerSupportTicket(ticketId, message.trim());
     const next = toTicket(created);
+    ticketListRequestRef.current += 1;
     setTickets(current => [next, ...current.filter(ticket => ticket.id !== next.id)]);
     return next;
   }, []);
@@ -150,8 +169,8 @@ export const SupportTicketProvider = ({children}: SupportTicketProviderProps) =>
     tickets.find(ticket => ticket.id === ticketId || ticket.backendId === ticketId), [tickets]);
 
   const value = useMemo<SupportTicketContextValue>(
-    () => ({tickets, isLoaded, refreshTickets, addTicket, replyToTicket, getTicketById}),
-    [tickets, isLoaded, refreshTickets, addTicket, replyToTicket, getTicketById],
+    () => ({tickets, isLoaded, refreshTickets, refreshTicket, addTicket, replyToTicket, getTicketById}),
+    [tickets, isLoaded, refreshTickets, refreshTicket, addTicket, replyToTicket, getTicketById],
   );
 
   return <SupportTicketContext.Provider value={value}>{children}</SupportTicketContext.Provider>;

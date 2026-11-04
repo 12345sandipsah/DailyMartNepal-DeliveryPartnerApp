@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import {
   faArrowLeft,
@@ -8,6 +8,7 @@ import {
 
 import {
   Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -15,7 +16,7 @@ import {
   View,
 } from 'react-native';
 
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -136,9 +137,35 @@ const formatFilterLabel = (filter: FilterType): string => {
 const SupportTicketsScreen = () => {
   const navigation = useNavigation<SupportTicketsNavigationProp>();
 
-  const { tickets } = useSupportTickets();
+  const { tickets, refreshTickets } = useSupportTickets();
 
   const [activeFilter, setActiveFilter] = useState<FilterType>('ALL');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
+
+  const refreshSupportTickets = useCallback(async () => {
+    setRefreshError('');
+    try {
+      await refreshTickets();
+    } catch (error) {
+      setRefreshError(error instanceof Error ? error.message : 'Unable to load your support tickets.');
+    }
+  }, [refreshTickets]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshSupportTickets();
+    }, [refreshSupportTickets]),
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshSupportTickets();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refreshSupportTickets]);
 
   const filteredTickets = useMemo(() => {
     if (activeFilter === 'ALL') {
@@ -259,6 +286,14 @@ const SupportTicketsScreen = () => {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor="#168447"
+              colors={["#168447"]}
+            />
+          }
         >
           <View style={styles.resultHeader}>
             <Text style={styles.resultTitle}>
@@ -272,6 +307,15 @@ const SupportTicketsScreen = () => {
               {filteredTickets.length === 1 ? 'ticket' : 'tickets'}
             </Text>
           </View>
+
+          {refreshError ? (
+            <View style={styles.refreshError}>
+              <Text style={styles.refreshErrorText}>{refreshError}</Text>
+              <Pressable onPress={() => { refreshSupportTickets(); }} accessibilityRole="button">
+                <Text style={styles.refreshRetry}>Retry</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {filteredTickets.length === 0 ? (
             <View style={styles.emptyState}>
@@ -801,6 +845,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
 
     paddingVertical: 40,
+  },
+
+  refreshError: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFF7F6',
+    borderWidth: 1,
+    borderColor: '#F0B4AE',
+    gap: 6,
+  },
+
+  refreshErrorText: {
+    fontSize: 12,
+    color: '#B42318',
+  },
+
+  refreshRetry: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#168447',
   },
 
   emptyIconContainer: {

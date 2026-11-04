@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, {useCallback, useState} from 'react';
 
 import {FontAwesomeIcon} from '@fortawesome/react-native-fontawesome';
 import {
@@ -13,6 +13,7 @@ import {
 
 import {
   Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -20,7 +21,7 @@ import {
   View,
 } from 'react-native';
 
-import {useNavigation} from '@react-navigation/native';
+import {useFocusEffect, useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 import type {MainStackParamList} from '../../../app/navigation/MainNavigator';
@@ -78,15 +79,39 @@ const getStatusStyles = (status: TicketStatus) => {
 
 const SupportScreen = () => {
   const navigation = useNavigation<SupportNavigationProp>();
-  const {tickets} = useSupportTickets();
+  const {tickets, refreshTickets} = useSupportTickets();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
+
+  const refreshSupport = useCallback(async () => {
+    setRefreshError('');
+    try {
+      await refreshTickets();
+    } catch (error) {
+      setRefreshError(error instanceof Error ? error.message : 'Unable to load your support requests.');
+    }
+  }, [refreshTickets]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshSupport();
+    }, [refreshSupport]),
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshSupport();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refreshSupport]);
 
   // The shared context inserts new tickets at the beginning.
   // Display only the two most recently added tickets here.
   const recentTickets = tickets.slice(0, 2);
 
   const handleContactSupport = () => {
-    // No live contact details are configured yet.
-    // Route the rider to the available support request flow.
     navigation.navigate('CreateSupportTicket');
   };
 
@@ -131,7 +156,15 @@ const SupportScreen = () => {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}>
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor="#168447"
+              colors={["#168447"]}
+            />
+          }>
           <View style={styles.introSection}>
             <Text style={styles.introTitle}>How can we help?</Text>
 
@@ -146,7 +179,7 @@ const SupportScreen = () => {
               style={styles.supportCard}
               onPress={handleContactSupport}
               accessibilityRole="button"
-              accessibilityLabel="Contact support">
+              accessibilityLabel="Message support">
               <View
                 style={[
                   styles.actionIconContainer,
@@ -161,11 +194,11 @@ const SupportScreen = () => {
 
               <View style={styles.supportCardContent}>
                 <Text style={styles.supportCardTitle}>
-                  Contact Support
+                  Message Support
                 </Text>
 
                 <Text style={styles.supportCardDescription}>
-                  Get help with a delivery, payment, or account issue.
+                  Send a request to the DailyMart support team and track its replies.
                 </Text>
               </View>
 
@@ -257,6 +290,15 @@ const SupportScreen = () => {
               <Text style={styles.sectionAction}>View all</Text>
             </Pressable>
           </View>
+
+          {refreshError ? (
+            <View style={styles.refreshError}>
+              <Text style={styles.refreshErrorText}>{refreshError}</Text>
+              <Pressable onPress={() => { refreshSupport(); }} accessibilityRole="button">
+                <Text style={styles.refreshRetry}>Retry</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {recentTickets.length === 0 ? (
             <View style={styles.emptyState}>
@@ -543,6 +585,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+  },
+
+  refreshError: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFF7F6',
+    borderWidth: 1,
+    borderColor: '#F0B4AE',
+    gap: 6,
+  },
+
+  refreshErrorText: {
+    fontSize: 12,
+    color: '#B42318',
+  },
+
+  refreshRetry: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#168447',
   },
 
   sectionTitle: {

@@ -65,6 +65,7 @@ export type MainStackParamList = {
     time: string;
     type: 'DELIVERY' | 'PICKUP' | 'PAYMENT' | 'SYSTEM';
     deliveryId?: string;
+    supportTicketId?: string;
     read: boolean;
   };
   Support: undefined;

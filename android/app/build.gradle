@@ -2,6 +2,11 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// Apply Google Services when the Firebase project file has been added.
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
+}
+
 // ADB reverse mappings disappear when the device reconnects. Recreate the
 // local API tunnel on every Android build, including builds started in Android Studio.
 def deliveryPartnerAppRoot = rootProject.projectDir.parentFile

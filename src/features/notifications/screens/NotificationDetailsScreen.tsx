@@ -7,6 +7,7 @@ import {
   faTruck,
   faWarehouse,
   faChevronRight,
+  faHeadset,
 } from '@fortawesome/free-solid-svg-icons';
 
 import {
@@ -37,6 +38,7 @@ type NotificationDetailsParams = {
     type: 'DELIVERY' | 'PICKUP' | 'PAYMENT' | 'SYSTEM';
 
     deliveryId?: string;
+    supportTicketId?: string;
 
     read: boolean;
   };
@@ -52,7 +54,9 @@ type NotificationDetailsNavigationProp =
 
 const getTypeLabel = (
   type: NotificationDetailsParams['NotificationDetails']['type'],
+  isSupport: boolean,
 ): string => {
+  if (isSupport) return 'SUPPORT';
   switch (type) {
     case 'DELIVERY':
       return 'DELIVERY';
@@ -73,7 +77,9 @@ const getTypeLabel = (
 
 const getTypeIcon = (
   type: NotificationDetailsParams['NotificationDetails']['type'],
+  isSupport: boolean,
 ) => {
+  if (isSupport) return faHeadset;
   switch (type) {
     case 'DELIVERY':
       return faTruck;
@@ -89,7 +95,9 @@ const getTypeIcon = (
 
 const getTypeColor = (
   type: NotificationDetailsParams['NotificationDetails']['type'],
+  isSupport: boolean,
 ): string => {
+  if (isSupport) return '#C62828';
   switch (type) {
     case 'DELIVERY':
       return '#2E7D32';
@@ -108,6 +116,19 @@ const getTypeColor = (
   }
 };
 
+const getTypeBackgroundStyle = (
+  type: NotificationDetailsParams['NotificationDetails']['type'],
+  isSupport: boolean,
+) => {
+  if (isSupport) return styles.supportTypeBackground;
+  switch (type) {
+    case 'DELIVERY': return styles.deliveryTypeBackground;
+    case 'PICKUP': return styles.pickupTypeBackground;
+    case 'PAYMENT': return styles.paymentTypeBackground;
+    default: return styles.systemTypeBackground;
+  }
+};
+
 const NotificationDetailsScreen = () => {
   const navigation = useNavigation<NotificationDetailsNavigationProp>();
 
@@ -123,13 +144,20 @@ const NotificationDetailsScreen = () => {
     type,
 
     deliveryId,
+    supportTicketId,
 
     read,
   } = route.params;
 
-  const typeColor = getTypeColor(type);
+  const isSupport = Boolean(supportTicketId);
+  const typeColor = getTypeColor(type, isSupport);
+  const typeIcon = getTypeIcon(type, isSupport);
 
   const handleRelatedAction = () => {
+    if (supportTicketId) {
+      navigation.navigate('SupportTicketDetails', {ticketId: supportTicketId});
+      return;
+    }
     if (!deliveryId) {
       return;
     }
@@ -164,11 +192,13 @@ const NotificationDetailsScreen = () => {
     }
   };
 
-  const showRelatedAction =
+  const showRelatedAction = Boolean(supportTicketId) || (
     deliveryId !== undefined &&
-    (type === 'DELIVERY' || type === 'PICKUP' || type === 'PAYMENT');
+    (type === 'DELIVERY' || type === 'PICKUP' || type === 'PAYMENT')
+  );
 
   const getActionLabel = (): string => {
+    if (supportTicketId) return 'Open Support Ticket';
     switch (type) {
       case 'DELIVERY':
         return 'Open Delivery';
@@ -211,20 +241,11 @@ const NotificationDetailsScreen = () => {
               style={[
                 styles.iconContainer,
 
-                {
-                  backgroundColor:
-                    type === 'DELIVERY'
-                      ? '#E8F5E9'
-                      : type === 'PICKUP'
-                      ? '#E3F2FD'
-                      : type === 'PAYMENT'
-                      ? '#FFF8E1'
-                      : '#F3E5F5',
-                },
+                getTypeBackgroundStyle(type, isSupport),
               ]}
             >
               <FontAwesomeIcon
-                icon={getTypeIcon(type)}
+                icon={typeIcon}
                 size={28}
                 color={typeColor}
               />
@@ -234,16 +255,7 @@ const NotificationDetailsScreen = () => {
               style={[
                 styles.typeBadge,
 
-                {
-                  backgroundColor:
-                    type === 'DELIVERY'
-                      ? '#E8F5E9'
-                      : type === 'PICKUP'
-                      ? '#E3F2FD'
-                      : type === 'PAYMENT'
-                      ? '#FFF8E1'
-                      : '#F3E5F5',
-                },
+                getTypeBackgroundStyle(type, isSupport),
               ]}
             >
               <Text
@@ -255,7 +267,7 @@ const NotificationDetailsScreen = () => {
                   },
                 ]}
               >
-                {getTypeLabel(type)}
+                {getTypeLabel(type, isSupport)}
               </Text>
             </View>
           </View>
@@ -421,6 +433,12 @@ const styles = StyleSheet.create({
 
     justifyContent: 'center',
   },
+
+  supportTypeBackground: {backgroundColor: '#FFEBEE'},
+  deliveryTypeBackground: {backgroundColor: '#E8F5E9'},
+  pickupTypeBackground: {backgroundColor: '#E3F2FD'},
+  paymentTypeBackground: {backgroundColor: '#FFF8E1'},
+  systemTypeBackground: {backgroundColor: '#F3E5F5'},
 
   typeBadge: {
     marginTop: 12,
